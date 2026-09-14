@@ -1,0 +1,21 @@
+# Python virtual environment
+astfs/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+
+# If there are any other env files
+.env.*
+!.env.example
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# General
+*.log

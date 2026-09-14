@@ -1,0 +1,42 @@
+# ── Core UI ───────────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── LLM provider ──────────────────────────────────────────────────────────────
+groq>=1.5.0
+
+# ── Data processing ───────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+openpyxl>=3.1.0  # required by pd.read_excel for .xlsx uploads — see file_reader.py
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+plotly>=5.20.0
+matplotlib>=3.8.0
+
+# ── RAG — embeddings ──────────────────────────────────────────────────────────
+# torch CPU only — no CUDA, no torchaudio, no torchvision conflicts
+torch
+torchvision
+
+# ── RAG — sentence embeddings ─────────────────────────────────────────────────
+sentence-transformers>=2.7.0
+
+# ── RAG — vector store ────────────────────────────────────────────────────────
+chromadb>=0.5.0
+
+# ── RAG — document parsers ────────────────────────────────────────────────────
+pypdf>=4.0.0
+python-docx>=1.1.0
+pdfplumber>=0.11.0  # table extraction from PDFs — see table_extraction.py
+duckdb>=1.0.0  # SQL engine for multi-dataset joins — see multi_table_service.py
+
+# ── Env vars ──────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── API service (api.py) — exposes /analyze to the Next.js frontend ───────────
+# streamlit above is still required even here: llm_provider.py uses
+# st.cache_data for the code-gen cache, imported transitively via
+# query_engine.py. Not used for any UI in api.py itself.
+fastapi>=0.110.0
+uvicorn>=0.29.0
+requests>=2.31.0
