@@ -1,155 +1,178 @@
 # Agentic AI Assistant for Data Analysis
 
-An agentic system for natural-language analysis of structured and unstructured data — upload a CSV or a document, ask questions in plain English, and get back real computed answers (tables, charts, scalars) or retrieval-grounded answers, not LLM guesses.
+An AI-powered data analysis platform that turns natural-language questions into real computation — not guessed numbers. It analyzes CSVs and Excel files, extracts and analyzes structured tables buried inside PDFs, and joins across multiple datasets with real SQL, all while every LLM-generated operation runs inside a sandboxed execution engine before it ever touches your data.
 
-The repo has two parts:
+<p>
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black">
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-blue">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-Python-009688">
+  <img alt="DuckDB" src="https://img.shields.io/badge/DuckDB-SQL%20Engine-FFF000">
+  <img alt="ChromaDB" src="https://img.shields.io/badge/ChromaDB-Vector%20Store-purple">
+</p>
 
-| Folder | What it is |
+---
+
+## Why this exists
+
+Most "AI data analyst" demos let a language model write code and just... run it, or worse, let the model eyeball a table and describe what it thinks the numbers say. Both approaches produce answers that sound confident and are sometimes wrong in ways that are hard to catch.
+
+This project takes a different position: **an LLM should decide what to compute, but a real, sandboxed execution engine should be the one to compute it.** Every insight, every chart, every follow-up answer, every SQL join is either the direct output of code actually running against your real data, or is explicitly labeled as something the data can't determine — never a plausible-sounding guess presented as fact.
+
+## Key Features
+
+### 📊 CSV / Excel Analysis
+- **Multi-format ingestion** — CSV, XLSX, XLS, with automatic detection of the correct sheet in multi-sheet Excel workbooks (skips dashboard/summary tabs in favor of the real underlying data table).
+- **Transparent, consent-based cleaning** — deterministic rule-based cleaning (currency symbols, percentages, thousands separators, identifier-column detection so postal codes and account numbers never get averaged) runs only after the user explicitly opts in, never silently.
+- **Autonomous Data Quality Agent** — goes beyond null-filling. Diagnoses inconsistent category spellings ("USA" / "U.S." / "United States"), implausible outliers, structurally meaningful blanks (e.g. a deliberately empty "Total" row in a financial table), and other defects a fixed set of regexes can't catch — then proposes and applies fixes, with the full diagnosis kept as an inspectable audit trail.
+- **Ask-a-question query panel** — natural language in, real pandas/Plotly code out, executed in the sandbox, returned as a table, chart, or scalar.
+- **Auto-Analyze** — five ranked business insights, each paired with a concrete recommended action, plus up to three charts the model chooses specifically to make those insights visible at a glance. Every chart is its own sandboxed execution, not a template.
+- **Grounded follow-up Q&A** — ask a question about an insight or a business decision. The model first decides whether answering precisely needs a real number computed from the data; if so, it writes and runs that computation before answering. For open-ended "why" questions, it can explore several independent angles (pricing, order size, regional concentration) rather than stopping at one shot.
+- **Downloadable PDF report** — a client-side generated report bundling insights, charts, and the follow-up conversation into a clean, print-ready document.
+
+### 📄 Document Intelligence (RAG)
+- Indexes PDFs, DOCX, and text documents for retrieval-augmented Q&A and auto-extracted key insights.
+- **Structured data extraction** — detects real tables inside PDFs and routes them into the *same* CSV analysis pipeline used for uploads, rather than summarizing them as text. A number from a table inside a PDF gets the same real-computation guarantee as a number from an uploaded spreadsheet.
+
+### 🔗 Multi-Dataset SQL Queries
+- Upload two or more related datasets, give each a short alias, and ask one question that spans all of them.
+- Real SQL — joins, aggregations, grouping — powered by an embedded analytical database, not a text summary stitched together from separate files.
+
+### 🔒 Sandboxed Execution Engine
+The architectural throughline underneath every feature above:
+- All LLM-generated code and SQL runs in an **isolated subprocess** with wall-clock timeout and memory limits.
+- An **AST-level guard unconditionally blocks every `import` statement** in generated code — there is no way for generated code to reach a module it wasn't explicitly handed.
+- pandas/NumPy/Plotly objects and the SQL engine's connection are exposed through **attribute-allowlisting proxies** — only specific, vetted methods are reachable; everything else raises immediately.
+- The SQL engine additionally runs with **external file and network access disabled at the engine level**, so a malicious query can't read arbitrary local files or make outbound network calls, regardless of how the query is phrased.
+
+Three independent attack vectors were deliberately tested against the real sandbox, each caught by a **different** layer — not the same check three times:
+
+| Attack | Caught by |
 |---|---|
-| [`AST 2.0/`](./AST%202.0) | Python backend — the actual analysis, cleaning, RAG, and sandboxing logic. Runs standalone as a Streamlit app, or as a FastAPI service behind the Next.js frontend. |
-| [`AST NextJS/`](./AST%20NextJS) | Next.js frontend — web UI that talks to the FastAPI service over a small JSON API. Currently tested against `localhost:8000`; not yet deployed. |
-
-They're developed together but are independently runnable. You can use the backend on its own via Streamlit (`streamlit run app.py`), or run both together for the full web app.
-
----
-
-## What it does
-
-**CSV / spreadsheet analysis**
-- Upload a CSV or Excel file and ask questions in plain English
-- Two-stage cleaning: a deterministic rule-based pass, then an optional LLM agent pass for defects the rules can't catch (inconsistent category spellings, implausible values, etc.)
-- Generates and runs pandas/Plotly code in a hardened sandbox, returning tables, scalars, or interactive charts
-- One-click "auto-analyze": ranked business insights + a handful of charts chosen to support them, with follow-up Q&A against the same context
-- Multi-table queries across several uploaded datasets at once, joined via real SQL (DuckDB) rather than an LLM trying to reason about multiple frames at once
-
-**Document intelligence (RAG)**
-- Upload a PDF, DOCX, TXT, or Markdown file
-- Parses, chunks, and embeds it locally (`all-MiniLM-L6-v2`, CPU, no network call for the embedding step)
-- Answers questions by retrieving relevant passages and sending only those to the LLM — raw document text never leaves the server except as cited context
-- Auto-extracts ranked insights from the document
-- Tables embedded inside PDFs are detected and extracted into real DataFrames, so questions about numbers in a table go through the same sandboxed computation as a CSV upload, instead of being eyeballed out of retrieved text
-
-**Dataset profiling**
-- Schema manifest, per-column stats, and a before/after cleaning report shown as an explicit, auditable step rather than a silent one
-
----
+| Malicious SQL text reading a local file | SQL engine's own access-control configuration |
+| Generated code trying to open a fresh, unrestricted connection | Connection proxy's attribute allowlist |
+| Generated code trying to import the SQL library directly | AST-level import ban |
 
 ## Architecture
 
-```
-┌────────────────────────┐        ┌──────────────────────────────────────┐
-│   AST NextJS (web UI)   │  HTTP  │        AST 2.0 (Python backend)       │
-│                          │ ─────▶ │                                        │
-│  CSV / doc upload        │        │  api.py — thin FastAPI layer:         │
-│  (direct-to-Blob, so     │        │    secret-header auth, fetch file     │
-│  large files skip the    │        │    from Blob, delegate to a service   │
-│  4.5MB serverless limit) │        │    module, return JSON                │
-│  Query panel, results,   │        │                                        │
-│  charts, RAG panel       │        │  analysis_service / rag_service /     │
-└────────────────────────┘        │  profile_service / cleaning_agent /    │
-                                    │  auto_analyze_service /               │
-                                    │  multi_table_service                  │
-                                    │    — pure logic, no FastAPI           │
-                                    │      dependency, unit-testable        │
-                                    │      directly                         │
-                                    │                                        │
-                                    │  query_engine.py — shortcut layer,    │
-                                    │    prompt building, code cleanup      │
-                                    │  llm_provider.py — single Groq API    │
-                                    │    client every module calls through  │
-                                    │  sandbox.py + sandbox_proxy.py +      │
-                                    │    sandbox_limits.py — AST/pattern    │
-                                    │    guard, allowlisted pd/np/plt/px    │
-                                    │    proxies, timeout + memory cap,     │
-                                    │    run in a separate process          │
-                                    │  rag_engine.py — parse/chunk/embed/   │
-                                    │    store/retrieve, ChromaDB in-memory │
-                                    └──────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[CSV / Excel Upload] --> D[File Reader]
+    B[PDF Document] --> E[Text → RAG Index]
+    B --> F[Table Extraction]
+    C[Multiple Files] --> G[Alias + Register as Tables]
+
+    D --> H
+    F --> H
+    G --> H
+
+    subgraph H[Sandboxed Execution Engine]
+        H1[AST Import Guard]
+        H2[Subprocess Isolation + Timeout/Memory Cap]
+        H3[SQL Engine Access Lockdown]
+        H4[Attribute-Allowlist Proxies]
+    end
+
+    H --> I[Data Quality Agent]
+    H --> J[Auto-Analyze: Insights + Charts]
+    H --> K[Multi-Dataset SQL Join]
+    E --> L[Document Q&A + Key Insights]
+
+    I --> M[Follow-up Q&A]
+    J --> M
+    K --> M
+    M --> N[Downloadable PDF Report]
 ```
 
-The same backend also ships a standalone Streamlit UI (`ui.py` / `app.py` in `AST 2.0`) that talks to the service modules directly, with no HTTP hop — useful for local development or running the tool without deploying a frontend at all. An earlier, simpler Streamlit prototype lives in `AST 2.0/legacy_streamlit/` for reference.
+## Tech Stack
 
----
+**Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS, Plotly.js, jsPDF
+**Backend:** FastAPI, Python, pandas, NumPy
+**AI / LLM:** Groq-hosted Llama models, with dual-model routing (a fast model for code generation, a larger model for reasoning)
+**Data engines:** DuckDB (SQL joins), ChromaDB (vector store for RAG)
+**Document processing:** pdfplumber (table extraction), pypdf, python-docx
+**Storage:** Vercel Blob (file storage)
 
-## Why the sandbox looks the way it does
+## Project Structure
 
-Every piece of LLM-generated code — pandas analysis, chart generation — runs through:
+```
+├── frontend/                    # Next.js app
+│   ├── app/api/                 # API routes proxying to the Python backend
+│   ├── components/              # CsvAnalysisTab, DocumentIntelligenceTab,
+│   │                             # MultiTableTab, and their sub-components
+│   └── lib/                     # Python service client, PDF report generator
+│
+└── backend/                     # FastAPI service
+    ├── api.py                   # Route definitions
+    ├── file_reader.py           # Unified CSV/Excel reader
+    ├── cleaning.py               # Deterministic rule-based cleaning
+    ├── cleaning_agent.py         # Autonomous data quality agent
+    ├── analysis_service.py       # Single-dataset query engine
+    ├── auto_analyze_service.py   # Insights + chart generation
+    ├── multi_table_service.py    # Multi-dataset SQL joins (DuckDB)
+    ├── table_extraction.py       # PDF table detection
+    ├── rag_engine.py             # Document indexing + retrieval
+    ├── sandbox.py                # AST-level safety guard
+    ├── sandbox_proxy.py          # Attribute-allowlisting proxies
+    └── sandbox_limits.py         # Subprocess isolation, timeout, memory caps
+```
 
-1. **AST analysis** — blocks imports, dunder access, and a denylist of dangerous calls regardless of encoding or obfuscation tricks.
-2. **Allowlisted module proxies** (`sandbox_proxy.py`) — `pd`, `np`, `plt`, `px`, `go` are handed to generated code as capability-limited proxies, not the real modules, so calls like `pd.read_pickle` or `fig.write_html` (which the AST guard can't catch, since they're just ordinary attribute calls) raise `AttributeError` instead of touching the filesystem.
-3. **Resource limits** (`sandbox_limits.py`) — a hard wall-clock timeout and, where the OS supports it, a memory cap, enforced by running the exec in a separate process so one runaway query can't hang the whole service.
-4. **A curated `__builtins__`** — a safe subset (`len`, `round`, `sum`, etc.) rather than an empty dict, so ordinary analysis code isn't broken as collateral damage.
+## Getting Started
 
-Multi-table SQL queries go through DuckDB rather than widening the Python sandbox, specifically because DuckDB's own SQL surface has functions (`read_csv`, `httpfs`) that can reach outside the sandbox in ways a keyword denylist can't fully catch — see `multi_table_service.py` for how that's handled.
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- A [Groq API key](https://console.groq.com)
+- A Vercel Blob storage token (for file uploads)
 
----
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS, Plotly.js |
-| File uploads | Vercel Blob (direct browser-to-storage, bypasses the 4.5MB serverless body limit) |
-| Backend API | FastAPI (Python) |
-| Standalone UI | Streamlit |
-| LLM inference | Groq API |
-| Data processing | pandas, numpy, DuckDB (multi-table SQL joins) |
-| Visualisation | Plotly (primary), matplotlib (fallback, Streamlit path only) |
-| Embeddings | `sentence-transformers` / `all-MiniLM-L6-v2` (local, CPU) |
-| Vector store | ChromaDB (in-memory) |
-| Document parsing | pypdf, python-docx, pdfplumber (PDF table extraction) |
-| Testing | pytest (backend service modules, sandbox, isolation) |
-
----
-
-## Getting started
-
-### Backend (`AST 2.0/`)
+### Backend
 
 ```bash
-cd "AST 2.0"
-
-# CPU-only torch first, avoids conflicts with the LLM extras below
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-cp .env.example .env
-# fill in GROQ_API_KEY, and PYTHON_SERVICE_SECRET if you're running the API
+Create a `.env` file:
+```
+GROQ_API_KEY=your_groq_api_key
+PYTHON_SERVICE_SECRET=any_shared_secret_you_choose
+```
 
-# Option A — standalone Streamlit app
-streamlit run app.py
-
-# Option B — FastAPI service for the Next.js frontend
+Run the API:
+```bash
 uvicorn api:app --reload --port 8000
 ```
 
-### Frontend (`AST NextJS/`)
+### Frontend
 
 ```bash
-cd "AST NextJS"
+cd frontend
 npm install
-cp .env.example .env.local
-# fill in BLOB_READ_WRITE_TOKEN, PYTHON_SERVICE_URL, PYTHON_SERVICE_SECRET
+```
+
+Create a `.env.local` file:
+```
+PYTHON_SERVICE_URL=http://localhost:8000
+PYTHON_SERVICE_SECRET=same_secret_as_backend
+BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+```
+
+Run the app:
+```bash
 npm run dev
 ```
 
-`PYTHON_SERVICE_SECRET` must match on both sides — it's the only thing gating the backend's endpoints on a free-tier deployment with no private networking between services, so every request without a matching `X-Service-Secret` header is rejected with a 401.
+## Known Limitations
 
-### Running tests
+Being upfront about where this currently falls short, rather than overselling it:
 
-```bash
-cd "AST 2.0"
-pytest                                  # full backend test suite
-python eval.py                          # deterministic-component eval harness, no LLM/API key needed
-python eval.py --suite security         # sandbox security checks only
-```
+- **Dataset size** — the pipeline loads files fully into memory (pandas), with a sandbox memory ceiling sized for typical exploratory datasets. Very large files (hundreds of MB+) can exceed that ceiling before hitting the nominal upload limit. Routing large-file analysis through the same DuckDB engine already used for multi-dataset joins — which can query files out-of-core without fully materializing them — is the planned fix.
+- **LLM output format variance** — several parsing layers had to be hardened against real (not just hand-written test) model output using different separators, markdown styles, and multi-line layouts than expected. This is an ongoing category of risk with any LLM-output-parsing system, not a one-time fix.
+- **PDF table extraction** works on text-based PDFs with real tabular structure; scanned/image-only PDFs would need OCR, which isn't currently implemented.
+- **Serverless execution time limits** apply to very long-running analyses on hosted deployments; a background-job architecture would remove this ceiling but isn't currently in place.
 
----
+## License
 
-## Project status
-
-- Backend service modules (analysis, cleaning, RAG, profiling, multi-table, auto-analyze) and their FastAPI wrapper are built and unit-tested.
-- Frontend CSV and Document Intelligence flows are built and verified end-to-end against a local backend instance.
-- Not yet done: real authentication (placeholder identity is used for now), production deployment of either side, and visual parity with the original Streamlit app's density.
-
-See `AST NextJS/README.md` for the full Next.js ↔ FastAPI API contract, and `AST 2.0/README.md` for backend module-by-module detail.
+This project is available for portfolio and educational reference.
