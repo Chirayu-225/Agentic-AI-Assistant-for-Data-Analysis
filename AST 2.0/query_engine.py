@@ -131,7 +131,64 @@ Rules:
     * For heatmaps use: result = px.imshow(df.select_dtypes(include='number').corr())
     * Assign the figure directly to result — do NOT call .show()
     * If using matplotlib, the LAST line MUST be: result = plt.gcf()
+    * CRITICAL — groupby()/value_counts()/size() put the grouping key in
+      the INDEX, not in a column, unless you call .reset_index() on the
+      result. Passing that grouping key's name as x= or y= to a px.*
+      function BEFORE reset_index() fails with "Value of 'x' is not the
+      name of a column in 'data_frame'". ALWAYS call .reset_index()
+      (and, for value_counts()/size(), rename the count column, e.g.
+      .reset_index(name='count')) before charting a grouped/aggregated
+      result by name.
+    * CRITICAL — NEVER rename columns by assigning to .columns (e.g.
+      `result.columns = ['a', 'b']`) or by assigning to .index.name/
+      .name directly. The sandbox blocks ALL attribute assignment on a
+      DataFrame/Series with "assigning attributes on df is not permitted
+      in the sandbox" — this applies to every DataFrame/Series variable,
+      not just one literally named df. ALWAYS use the .rename() METHOD
+      instead, e.g. `result = result.rename(columns={{'old': 'new'}})` —
+      it does the same job without ever assigning an attribute.
 """
+
+
+def build_large_csv_sql_prompt(schema_text: str, user_query: str, alias: str = "data") -> str:
+    """SQL counterpart to build_analysis_prompt(), used only for files big
+    enough to route through analysis_service.py's DuckDB-native path
+    (see file_reader.should_use_large_csv_path). Deliberately mirrors
+    multi_table_service.build_multi_table_prompt's shape — same
+    REASONING + one ```python block containing con.sql(...).df() —
+    since that's the one prompt style build_multi_table_prompt's
+    _parse_sql_response()-equivalent already knows how to parse, so
+    this path reuses it rather than inventing a second format."""
+    return f"""You are an expert data analyst answering a question about a
+large dataset, using SQL (DuckDB syntax, which is close to standard SQL).
+The file is too large to load into pandas directly, so it's queried
+through DuckDB instead — this changes HOW you write the query, not what
+you can compute; DuckDB SQL can express anything the equivalent pandas
+code could.
+
+TABLE '{alias}':
+{schema_text}
+
+User's question: {user_query}
+
+Write ONE SQL query answering this question. Respond in exactly this
+format — a one-sentence reasoning line, then ONE python code block:
+
+REASONING: <one sentence on your query approach>
+
+```python
+result = con.sql(\"\"\"
+<your SQL query here, referencing the table as {alias}>
+\"\"\").df()
+```
+
+Rules:
+- Only reference columns listed above — never invent one.
+- The only operation available is con.sql(...).df() — nothing else.
+- For a large result, use LIMIT — DuckDB pushes it down efficiently
+  instead of computing the full result first.
+"""
+
 
 
 def build_chart_code_prompt(schema_text: str, chart_spec: str) -> str:
@@ -161,6 +218,22 @@ Rules:
 - DO NOT use print() anywhere — it is not available in the sandbox.
 - Use plotly.express (px) or plotly.graph_objects (go). Assign the final
   figure directly to a variable named 'result'. Do NOT call .show().
+- CRITICAL — groupby()/value_counts()/size() put the grouping key in the
+  INDEX, not in a column, unless you call .reset_index() on the result.
+  Passing that grouping key's name as x= or y= to px.bar/px.line/etc.
+  BEFORE reset_index() fails with "Value of 'x' is not the name of a
+  column in 'data_frame'". ALWAYS call .reset_index() (and, for
+  value_counts()/size(), rename the count column, e.g.
+  .reset_index(name='count')) before passing the result to a plotly.express
+  function that references the grouping key or count by name.
+- CRITICAL — NEVER rename columns by assigning to .columns (e.g.
+  `result.columns = ['a', 'b']`) or by assigning to .index.name/.name
+  directly. The sandbox blocks ALL attribute assignment on a
+  DataFrame/Series with "assigning attributes on df is not permitted in
+  the sandbox" — this applies to every DataFrame/Series variable, not
+  just one literally named df. ALWAYS use the .rename() METHOD instead,
+  e.g. `result = result.rename(columns={{'old': 'new'}})` — it does the
+  same job without ever assigning an attribute.
 """
 
 

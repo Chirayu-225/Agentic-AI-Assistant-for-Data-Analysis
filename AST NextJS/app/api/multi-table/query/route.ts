@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { runMultiTableQuery } from "@/lib/pythonClient";
+import { runMultiTableQuery, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -37,9 +37,6 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: `Multi-table query service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Multi-table query service unavailable");
   }
 }

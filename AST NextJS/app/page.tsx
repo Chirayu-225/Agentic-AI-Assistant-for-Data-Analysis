@@ -43,9 +43,38 @@ export default function Home() {
           </TabButton>
         </div>
 
-        {tab === "csv" ? (
+        {/*
+          All three tabs stay MOUNTED at all times — only CSS visibility
+          switches between them (`hidden` vs not), rather than the old
+          ternary that rendered just one and let React unmount the
+          others.
+
+          WHY THIS CHANGED (live bug): CsvAnalysisTab and
+          DocumentIntelligenceTab each run a real network call inside a
+          useEffect keyed on their `file`/`file` prop the moment they
+          mount (/api/profile, /api/rag/index respectively) — see those
+          components' own effects. Unmounting on tab-switch and
+          remounting on switch-back doesn't preserve React state across
+          that gap; it throws it away, so the component's effect fires
+          again from scratch as if it were seeing the file for the first
+          time. Concretely: pick a table on the Document Intelligence
+          tab (→ CSV Analysis, correct), then click back to Document
+          Intelligence — the old code unmounted DocumentIntelligenceTab
+          when you left and remounted a BRAND NEW instance when you
+          returned, which re-ran /api/rag/index (re-parsing, re-chunking,
+          re-embedding the same PDF) instead of just showing the table
+          list you'd already gotten back — from the user's side, "you
+          can't go back to choosing a different table," since it looked
+          like the app lost track of what it already found until that
+          full re-index finished. Keeping all three mounted and just
+          hiding the inactive ones with CSS fixes this for every tab
+          pair, not only Document Intelligence → CSV, and is the
+          standard fix for "switching tabs shouldn't cost a re-fetch."
+        */}
+        <div className={tab === "csv" ? "" : "hidden"}>
           <CsvAnalysisTab file={csvFile} />
-        ) : tab === "document" ? (
+        </div>
+        <div className={tab === "document" ? "" : "hidden"}>
           <DocumentIntelligenceTab
             file={docFile}
             onAnalyzeTable={(table) => {
@@ -58,9 +87,10 @@ export default function Home() {
               setTab("csv");
             }}
           />
-        ) : (
+        </div>
+        <div className={tab === "multi" ? "" : "hidden"}>
           <MultiTableTab />
-        )}
+        </div>
       </main>
     </div>
   );

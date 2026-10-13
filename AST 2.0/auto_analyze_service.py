@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 from cleaning import rule_based_clean
+from cache_layer import cached_rule_clean
 from file_reader import read_tabular_file
 
 
@@ -211,7 +212,7 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
         return {"success": False, "error": f"Could not parse CSV: {e}"}
 
     try:
-        df, _rule_log = rule_based_clean(df)
+        df, _rule_log = cached_rule_clean(df, csv_bytes, rule_based_clean)
 
         from profiler import (
             build_dataset_profile,
@@ -219,13 +220,33 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
             build_auto_analyze_prompt,
             build_chart_plan_prompt,
         )
-        from query_engine import llm_with_fallback
+        from query_engine import insight_llm
 
         profile = build_dataset_profile(df, _cache_key="auto-analyze")
         profile_str = format_profile_for_llm(profile)
 
+        # LIVE BUG: insights generation used to go through llm_with_fallback
+        # (query_engine.py) which — despite the generic name — ALWAYS calls
+        # llm_code_call, i.e. the smaller code-specialised model
+        # (_CODE_MODEL = "openai/gpt-oss-20b"), never the larger
+        # _CHAT_MODEL ("openai/gpt-oss-120b") that query_engine.insight_llm
+        # exists specifically to reach. That's backwards for this prompt:
+        # build_auto_analyze_prompt asks for business prose in an exact
+        # numbered format, not code, and the smaller model was measurably
+        # less reliable at holding that format on some real datasets — a
+        # small (7-row), numerically dense table extracted from a PDF
+        # (13 near-identical monthly columns) produced a response
+        # _parse_insights couldn't find a single "N•" block in, surfaced
+        # to the user as "Could not generate insights for this dataset."
+        # insight_llm/the 120B chat model is already wired up and used
+        # correctly elsewhere in this file's sibling function
+        # (query_engine.insight_llm) — every other prompt in this app
+        # that must produce valid Python/SQL stays on llm_with_fallback;
+        # this one and the chart-plan prompt below don't produce code at
+        # all, so they're the ones that should have been on the chat
+        # model all along.
         insights_prompt = build_auto_analyze_prompt(profile_str)
-        insights_raw = llm_with_fallback(insights_prompt, temperature=0.3, session_id=session_id)
+        insights_raw = insight_llm(insights_prompt, temperature=0.3)
         insights = _parse_insights(insights_raw)
 
         if not insights:
@@ -246,8 +267,15 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
         charts: list[dict] = []
         charts_error = None
         try:
+            # Same fix as the insights call above — this plans WHICH
+            # charts to draw (title/spec text), it doesn't write chart
+            # code itself (that's build_chart_code_prompt, in
+            # _run_one_chart below, which correctly stays on
+            # llm_with_fallback/the code model). Planning prose belongs
+            # on insight_llm/the chat model for the same reliability
+            # reason.
             plan_prompt = build_chart_plan_prompt(profile_str, insights_text)
-            plan_raw = llm_with_fallback(plan_prompt, temperature=0.2, session_id=session_id)
+            plan_raw = insight_llm(plan_prompt, temperature=0.2)
             chart_plans = _parse_chart_plan(plan_raw)
 
             if not chart_plans:
@@ -327,13 +355,13 @@ def answer_followup(
     """
     try:
         df = _read_csv(csv_bytes, filename)
-        df, _ = rule_based_clean(df)
+        df, _ = cached_rule_clean(df, csv_bytes, rule_based_clean)
     except Exception as e:
         return {"success": False, "error": f"Could not load dataset: {e}"}
 
     try:
         from profiler import build_followup_decision_prompt, build_followup_answer_prompt
-        from query_engine import llm_with_fallback
+        from query_engine import llm_with_fallback, insight_llm
         from sandbox_limits import run_sandboxed
 
         insights_text = "\n".join(
@@ -361,8 +389,30 @@ def answer_followup(
                     print(f"[auto-analyze followup] one angle's computation "
                           f"failed, skipping it: {sbr.error}", flush=True)
 
+        # decision_prompt above stays on llm_with_fallback/the code model —
+        # it can legitimately emit Python snippets. This step only ever
+        # writes the conversational reply (see build_followup_answer_prompt),
+        # never code, so it gets the same insight_llm/chat-model fix as
+        # run_auto_analyze's insights and chart-plan calls above, for the
+        # same reliability reason — not yet confirmed broken on real data
+        # the way those two were, but there's no reason to leave a pure
+        # prose prompt on the weaker code-specialised model once the
+        # pattern's been found.
+        # AI SECURITY: computed_facts are real rows/values pulled from the
+        # user's file by the sandbox — the one place real data reached an
+        # LLM prompt WITHOUT passing through profiler.py's redaction. Mask
+        # likely PII patterns and fence each fact as untrusted data (a cell
+        # reading "ignore previous instructions" must not be obeyed). Name
+        # columns are NOT withheld here: the user asked about their own
+        # data and may legitimately need "who is the top customer" answered.
+        from pii_redaction import redact_pii_logged
+        from prompt_injection_guard import wrap_untrusted
+        computed_facts = [
+            wrap_untrusted(redact_pii_logged(f, context="follow-up computed fact"), source_label="computed result")
+            for f in computed_facts
+        ]
         answer_prompt = build_followup_answer_prompt(insights_text, prior_qa_text, computed_facts, question)
-        answer = llm_with_fallback(answer_prompt, temperature=0.2, session_id=session_id)
+        answer = insight_llm(answer_prompt, temperature=0.2)
 
         return {"success": True, "answer": answer.strip(), "error": None}
     except Exception as e:

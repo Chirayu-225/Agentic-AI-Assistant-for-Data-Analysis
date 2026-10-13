@@ -1,0 +1,10 @@
+id,question,expected,answer_type,tolerance,category,manual_seconds
+Q1,How many rows are in the dataset?,24,number,0,count,5
+Q2,How many columns are there?,6,number,0,count,5
+Q3,What is the total revenue?,74100,number,0.001,aggregate,20
+Q4,What is the average units per order?,5.25,number,0.01,aggregate,25
+Q5,Which region has the highest total revenue?,South,text,,groupby,45
+Q6,List the regions ranked by total revenue,South|East|North|West,contains,,ranking,60
+Q7,How many distinct products are there?,3,number,0,count,20
+Q8,How many orders were for Phone?,8,number,0,filter,30
+Q9,Plot total revenue by region as a bar chart,,chart,,chart,120

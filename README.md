@@ -53,6 +53,14 @@ Three independent attack vectors were deliberately tested against the real sandb
 | Generated code trying to open a fresh, unrestricted connection | Connection proxy's attribute allowlist |
 | Generated code trying to import the SQL library directly | AST-level import ban |
 
+### 🛡️ Security Operations Layer
+Defences you can inspect after the fact, not just trust:
+- **Tamper-evident audit log** (`audit_log.py`) — JSONL, one record per security-relevant event (requests, sandbox blocks/timeouts, PII redactions, injection detections, auth failures, rate limits), chained with SHA-256 so edited, deleted or reordered lines are detected by `verify_chain()`. It never stores request bodies, prompts, dataset values or PII; URLs and IPs are hashed. This detects casual tampering only — ship the log off-box if that matters.
+- **Rate limiting** (`rate_limiter.py`) — sliding-window limits keyed on session (heavy LLM endpoints 4/min + 30/hr, medium 20/min, light 30/min) plus a per-IP backstop; returns `429` with `Retry-After`. State is per-process in memory, so multiply limits by worker count.
+- **PII protection** (`pii_redaction.py`) — checksum-validated detection (Luhn cards, Verhoeff Aadhaar), PAN, Indian mobile, UPI, SSN, email, phone. Columns *named* like personal data (name, email, phone, address, DOB...) are withheld from every LLM prompt by default. `/profile` returns a `piiReport` the UI shows before any AI step.
+- **Caching** (`cache_layer.py`) — byte-bounded LRU+TTL caches for downloads, parsed/cleaned frames and deterministic `/profile` and `/clean` results, keyed on content hash. LLM-backed answers are deliberately never cached.
+- **Evaluation harness** (`eval_harness.py`) — measures accuracy against ground-truth answers you compute independently, with Wilson 95% intervals, failure taxonomy, latency and repeat-consistency. See below.
+
 ## Architecture
 
 ```mermaid
@@ -114,7 +122,13 @@ flowchart TD
     ├── rag_engine.py             # Document indexing + retrieval
     ├── sandbox.py                # AST-level safety guard
     ├── sandbox_proxy.py          # Attribute-allowlisting proxies
-    └── sandbox_limits.py         # Subprocess isolation, timeout, memory caps
+    ├── sandbox_limits.py         # Subprocess isolation, timeout, memory caps
+    ├── audit_log.py              # Tamper-evident audit trail
+    ├── rate_limiter.py           # Sliding-window rate limits
+    ├── pii_redaction.py          # PII detection + personal-column withholding
+    ├── cache_layer.py            # Bounded LRU/TTL caches
+    ├── eval_harness.py           # Ground-truth accuracy evaluation
+    └── test_*.py                 # run with: python3 test_<name>.py
 ```
 
 ## Getting Started
@@ -164,6 +178,34 @@ Run the app:
 npm run dev
 ```
 
+## Configuration (optional environment variables)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AUDIT_LOG_PATH` | `logs/audit.jsonl` | Audit log location (falls back to stdout if unwritable) |
+| `AUDIT_LOG_CODE` | off | `1` also stores executed code (truncated) |
+| `AUDIT_LOG_STDOUT` / `AUDIT_LOG_DISABLED` | off | Echo records to stdout / turn auditing off |
+| `RATE_LIMIT_ENABLED` | on | `0` disables limiting |
+| `RATE_LIMIT_MULTIPLIER` | 1 | Scales every limit (e.g. `2` per extra worker) |
+| `CACHE_ENABLED` | on | `0` bypasses all caches |
+| `CACHE_TTL_SECONDS` | 900 | Entry lifetime |
+| `CACHE_BLOB_MB` / `CACHE_FRAME_MB` / `CACHE_RESULT_MB` | 64 / 96 / 16 | Memory budgets |
+| `PII_WITHHOLD_PERSONAL_COLUMNS` | on | `0` sends personal-named columns to the LLM (not recommended) |
+| `PII_USE_NER` | off | `1` enables the optional spaCy name detector (needs `spacy` + a model; untested adapter) |
+
+`GET /admin/stats` (secret-protected) reports cache hit rates, limiter counters and whether the audit chain is intact.
+
+## Evaluating accuracy
+
+```bash
+python eval_harness.py --init-template mydata.csv     # starter questions from your real columns
+# fill in `expected` BY HAND, independently of the assistant
+python eval_harness.py --dataset mydata.csv --questions questions.csv            # needs GROQ_API_KEY
+python eval_harness.py --dataset mydata.csv --questions questions.csv --repeat 3 # consistency
+python eval_harness.py --dataset eval_data/sample_sales.csv --questions eval_data/sample_questions.csv --solver shortcut  # offline baseline
+```
+Results land in `eval_results/<timestamp>/` (`report.md`, `results.csv`, `summary.json`). Small question sets give wide intervals; the report prints them.
+
 ## Known Limitations
 
 Being upfront about where this currently falls short, rather than overselling it:
@@ -171,6 +213,8 @@ Being upfront about where this currently falls short, rather than overselling it
 - **Dataset size** — the pipeline loads files fully into memory (pandas), with a sandbox memory ceiling sized for typical exploratory datasets. Very large files (hundreds of MB+) can exceed that ceiling before hitting the nominal upload limit. Routing large-file analysis through the same DuckDB engine already used for multi-dataset joins — which can query files out-of-core without fully materializing them — is the planned fix.
 - **LLM output format variance** — several parsing layers had to be hardened against real (not just hand-written test) model output using different separators, markdown styles, and multi-line layouts than expected. This is an ongoing category of risk with any LLM-output-parsing system, not a one-time fix.
 - **PDF table extraction** works on text-based PDFs with real tabular structure; scanned/image-only PDFs would need OCR, which isn't currently implemented.
+- **Rate limits and caches are per-process and in-memory** — they reset on restart and aren't shared across workers or serverless instances.
+- **Personal-named columns are withheld from the LLM**, so the cleaning agent can't, for example, normalise spellings inside a `customer_name` column.
 - **Serverless execution time limits** apply to very long-running analyses on hosted deployments; a background-job architecture would remove this ceiling but isn't currently in place.
 
 ## License

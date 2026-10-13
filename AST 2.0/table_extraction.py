@@ -94,8 +94,21 @@ def extract_tables_from_pdf(file_bytes: bytes, filename: str) -> list[dict]:
         }
     Never raises for a PDF with no tables — returns an empty list, since
     "no structured data in this document" is a completely normal,
-    expected outcome, not an error.
+    expected outcome, not an error. Runs under a wall-clock timeout
+    (pdf_limits.run_with_timeout) — a large/complex PDF times out
+    cleanly, on top of index_document()'s own try/except that already
+    treats table-extraction failure as non-fatal to indexing.
     """
+    from pdf_limits import run_with_timeout
+
+    result = run_with_timeout(_extract_tables_from_pdf_impl, args=(file_bytes, filename))
+    if not result.success:
+        print(f"[table_extraction] '{filename}' failed or timed out: {result.error}", flush=True)
+        return []
+    return result.value
+
+
+def _extract_tables_from_pdf_impl(file_bytes: bytes, filename: str) -> list[dict]:
     try:
         import pdfplumber
     except ImportError:

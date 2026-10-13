@@ -15,6 +15,8 @@
  *   dependency for the corresponding check.
  */
 
+import { NextResponse } from "next/server";
+
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL?.replace(/\/+$/, "");
 const PYTHON_SERVICE_SECRET = process.env.PYTHON_SERVICE_SECRET;
 
@@ -127,7 +129,23 @@ export interface ProfileResponse {
   schema?: SchemaColumn[];
   preview?: Record<string, unknown>[];
   previewCount?: number;
+  piiReport?: PiiReport | null;
   error?: string;
+}
+
+export interface PiiFlaggedColumn {
+  column: string;
+  severity: "high" | "medium" | "low";
+  categories: Record<string, { count: number; pct: number }>;
+  nameHint: "personal" | "review" | null;
+  withheldFromLlm: boolean;
+}
+
+export interface PiiReport {
+  risk: "none" | "low" | "medium" | "high";
+  flaggedColumns: PiiFlaggedColumn[];
+  summary: string;
+  scannedValuesPerColumn: number;
 }
 
 export interface CleanRequest {
@@ -147,6 +165,34 @@ export interface CleanResponse {
   error?: string;
 }
 
+export class RateLimitedError extends Error {
+  retryAfterSeconds: number;
+  constructor(retryAfterSeconds: number) {
+    super(`Too many requests. Please wait ${retryAfterSeconds}s and try again.`);
+    this.name = "RateLimitedError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * Shared catch-block response for every route that forwards to the Python
+ * service. A rate-limit rejection becomes a real HTTP 429 with Retry-After
+ * (the user did nothing wrong and the service is fine); anything else keeps
+ * the original 502 "<label>: <message>" behavior.
+ */
+export function upstreamErrorResponse(err: unknown, label: string): NextResponse {
+  if (err instanceof RateLimitedError) {
+    return NextResponse.json(
+      { error: err.message },
+      { status: 429, headers: { "Retry-After": String(err.retryAfterSeconds) } }
+    );
+  }
+  return NextResponse.json(
+    { error: `${label}: ${(err as Error).message}` },
+    { status: 502 }
+  );
+}
+
 async function callPythonService<TResponse>(
   path: string,
   body: unknown,
@@ -161,6 +207,15 @@ async function callPythonService<TResponse>(
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
+
+  if (res.status === 429) {
+    // The Python service's rate limiter (rate_limiter.py) said slow down.
+    // This is a normal, expected outcome — not an outage — so it gets its
+    // own error type and a plain-language message instead of a raw
+    // "Python service error (429): {...json...}" string.
+    const retryAfter = Number(res.headers.get("Retry-After")) || 30;
+    throw new RateLimitedError(retryAfter);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -186,8 +241,23 @@ export function getDocumentInsights(req: RagInsightsRequest): Promise<RagInsight
   return callPythonService<RagInsightsResponse>("/rag/insights", req);
 }
 
+// /profile and /clean both do real work before any LLM call: read_tabular_file()
+// on the Python side, which for a multi-sheet Excel workbook means real
+// openpyxl/pandas parse time (was much worse before file_reader.py's
+// sheet-selection fix — see that file's _pick_best_excel_sheet docstring
+// for the live bug this was filed from: a 5-sheet, 18MB workbook took
+// 42s just to pick which sheet to use, well past the old default 35s
+// here, which is exactly what "Profiling service unavailable: The
+// operation was aborted due to timeout" meant — our own client-side
+// abort firing before Python ever got to answer, same as INDEX_TIMEOUT_MS's
+// note above). Even after that fix, a large single sheet still takes
+// real time to parse (that same workbook's winning sheet alone: ~24s) —
+// this constant gives that genuine parse time headroom instead of
+// assuming a CSV-speed read.
+const FILE_READ_TIMEOUT_MS = 60_000;
+
 export function getProfile(req: ProfileRequest): Promise<ProfileResponse> {
-  return callPythonService<ProfileResponse>("/profile", req);
+  return callPythonService<ProfileResponse>("/profile", req, FILE_READ_TIMEOUT_MS);
 }
 
 export interface CleanAgentRequest {
@@ -218,12 +288,37 @@ export interface CleanAgentResponse {
 }
 
 export function getCleaningReport(req: CleanRequest): Promise<CleanResponse> {
-  return callPythonService<CleanResponse>("/clean", req);
+  // Same read_tabular_file() cost as /profile, same reasoning — see
+  // FILE_READ_TIMEOUT_MS's comment above.
+  return callPythonService<CleanResponse>("/clean", req, FILE_READ_TIMEOUT_MS);
 }
 
-// The cleaning agent involves an LLM call plus a sandboxed exec — same
-// order-of-magnitude latency as chart generation, not a plain fetch.
-const CLEAN_AGENT_TIMEOUT_MS = 45_000;
+// LIVE BUG: a 5-sheet, 18MB workbook (hotel_revenue_historical_full-2.xlsx,
+// the same file that filed the /profile timeout above) took 46253ms here
+// and got aborted at the old 45s ceiling — "Cleaning agent service
+// unavailable: The operation was aborted due to timeout", again our own
+// client-side abort, not a Python crash (backend log showed the request
+// reached the LLM stage and printed "[cleaning-agent] 0 defects
+// diagnosed" — it was still running, just past our deadline).
+//
+// WHY THIS ROUTE IS SLOWER THAN /profile'S FILE_READ_TIMEOUT_MS ALONE:
+// cleaning_agent.py's run_cleaning_agent() does NOT share session_cache
+// (that cache only covers /analyze) and does NOT reuse the /profile or
+// /clean call the user already made — it calls read_tabular_file() on
+// its own, fresh, every time. So this endpoint pays that same ~24s
+// large-sheet parse cost (see file_reader.py's _pick_best_excel_sheet
+// docstring) EVERY time it's invoked, THEN does rule_based_clean(),
+// THEN one LLM call to diagnose defects, and — only if defects are
+// found — a SECOND LLM call to generate a fix plus a sandboxed exec
+// (run_sandboxed(..., timeout_seconds=20)) on top of that. 45s was sized
+// as if this were one LLM call over a small in-memory frame; it doesn't
+// have room for a real file parse plus up to two LLM calls plus a
+// sandbox exec, stacked sequentially. 120s covers the worst realistic
+// case (large-sheet parse + diagnose call + fix call + a full 20s
+// sandbox timeout) with headroom, same order of magnitude as this app's
+// other worst-case budget (FETCH_TIMEOUT_SECONDS on the Python side is
+// already 120s for exactly this class of large-file cost).
+const CLEAN_AGENT_TIMEOUT_MS = 120_000;
 
 export function runCleaningAgent(req: CleanAgentRequest): Promise<CleanAgentResponse> {
   return callPythonService<CleanAgentResponse>("/clean/agent", req, CLEAN_AGENT_TIMEOUT_MS);
@@ -287,10 +382,25 @@ export interface FollowUpResponse {
   error?: string;
 }
 
-// Up to 2 LLM calls (decide-if-code-needed, then answer) plus a possible
-// sandbox exec — smaller than a full auto-analyze run but still real
-// LLM latency, not a cheap lookup.
-const FOLLOWUP_TIMEOUT_MS = 30_000;
+// LIVE BUG: same file as the /clean/agent and /profile bugs above
+// (hotel_revenue_historical_full-2.xlsx) 502'd here too — "Follow-up
+// service unavailable: The operation was aborted due to timeout" at
+// 30522ms, just past the old 30s ceiling. Same root cause as
+// /clean/agent: auto_analyze_service.answer_followup() calls
+// _read_csv()/read_tabular_file() fresh on every single follow-up
+// question — it does NOT share session_cache (/analyze-only) and does
+// NOT reuse the file the user already loaded for the auto-analyze run
+// that produced the insights being asked about. So every follow-up
+// pays the same ~24s large-sheet parse cost (see file_reader.py's
+// _pick_best_excel_sheet docstring) on top of up to 2 LLM calls
+// (decide, then answer) plus up to 3 sandboxed code execs for the
+// "explanatory angles" the decision step can request. 30s was sized
+// for that LLM+sandbox work alone, assuming a cheap, already-parsed
+// dataset — it was never going to survive a large multi-sheet Excel
+// file's own read cost. 90s gives room for the read plus that full
+// LLM/sandbox chain, mirroring the /clean/agent fix above for the
+// same reason.
+const FOLLOWUP_TIMEOUT_MS = 90_000;
 
 export function askFollowUp(req: FollowUpRequest): Promise<FollowUpResponse> {
   return callPythonService<FollowUpResponse>("/auto-analyze/follow-up", req, FOLLOWUP_TIMEOUT_MS);
@@ -319,10 +429,20 @@ export interface MultiTableQueryResponse {
   error?: string;
 }
 
-// One LLM call (SQL generation) + one sandboxed exec, same order of
-// magnitude as a single-table analyze query — but joins/aggregations
-// across real files can take a bit longer than a single-table query.
-const MULTI_TABLE_TIMEOUT_MS = 45_000;
+// Not live-bug-confirmed yet, but bumped preemptively for the same
+// reason as /clean/agent and /auto-analyze/follow-up above: every
+// dataset in the join that ISN'T routed through the large-CSV/DuckDB
+// path (should_use_large_csv_path is CSV/TXT-only — see file_reader.py
+// — so ANY Excel file in a join always goes through pandas/openpyxl
+// regardless of size) gets a fresh, uncached read_tabular_file() call
+// here too. Join a workbook shaped like hotel_revenue_historical_full-2
+// .xlsx (the file behind all three confirmed timeouts above) into a
+// multi-table query, and this endpoint pays that same ~24s parse cost
+// on top of the SQL-generation LLM call and the sandboxed join exec —
+// 45s was sized like the other endpoints were, without that cost in
+// mind. Matching the other fixes' order of magnitude rather than
+// waiting for this to also 502 in the field.
+const MULTI_TABLE_TIMEOUT_MS = 90_000;
 
 export function runMultiTableQuery(req: MultiTableQueryRequest): Promise<MultiTableQueryResponse> {
   return callPythonService<MultiTableQueryResponse>("/multi-table/query", req, MULTI_TABLE_TIMEOUT_MS);

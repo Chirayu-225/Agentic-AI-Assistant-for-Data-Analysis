@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getDocumentInsights } from "@/lib/pythonClient";
+import { getDocumentInsights, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -26,9 +26,6 @@ export async function POST(request: NextRequest) {
     const result = await getDocumentInsights({ docId, filename });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: `Insights service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Insights service unavailable");
   }
 }

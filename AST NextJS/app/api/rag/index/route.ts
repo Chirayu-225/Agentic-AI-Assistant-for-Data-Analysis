@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
-import { indexDocument, type ExtractedTable } from "@/lib/pythonClient";
+import { indexDocument, type ExtractedTable, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -65,9 +65,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: `Indexing service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Indexing service unavailable");
   }
 }

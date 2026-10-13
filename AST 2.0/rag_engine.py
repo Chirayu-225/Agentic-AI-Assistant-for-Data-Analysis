@@ -31,6 +31,7 @@ PER-USER ISOLATION
     scattered across every read path.
 """
 
+import os
 import re
 import hashlib
 import base64
@@ -125,7 +126,12 @@ def parse_document(file_bytes: bytes, filename: str) -> str:
     """Route to the correct parser based on file extension."""
     ext = Path(filename).suffix.lower()
     if ext == ".pdf":
-        return parse_pdf(file_bytes)
+        from pdf_limits import run_with_timeout
+
+        result = run_with_timeout(parse_pdf, args=(file_bytes,))
+        if not result.success:
+            raise ValueError(result.error)
+        return result.value
     elif ext == ".docx":
         return parse_docx(file_bytes)
     elif ext in (".txt", ".md", ".rst", ".log", ".csv"):
@@ -218,20 +224,67 @@ def get_embed_model():
     return _embed_model
 
 
-def embed_chunks(chunks: list[dict]) -> list[list[float]]:
-    """Encode chunk texts into dense vectors."""
-    model  = get_embed_model()
-    texts  = [c["text"] for c in chunks]
-    vecs   = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
-    return vecs.tolist()
+def embed_chunks(chunks: list[dict], batch_size: int = 64) -> list[list[float]]:
+    """Encode chunk texts into dense vectors, in fixed-size batches.
+
+    Was a single model.encode(all_texts) call — fine for a short
+    document, but for a large PDF (thousands of chunks) that's one big
+    peak-memory spike: every chunk's tokenized input plus every
+    resulting vector held in memory simultaneously before anything is
+    returned. Batching bounds peak memory to roughly one batch's worth
+    regardless of document size, at the cost of a few more (cheap,
+    local, no network) calls into the same already-loaded model — this
+    is what actually lets a much bigger PDF be indexed without a memory
+    spike proportional to its length.
+    """
+    model = get_embed_model()
+    texts = [c["text"] for c in chunks]
+
+    all_vecs = []
+    for start in range(0, len(texts), batch_size):
+        batch = texts[start : start + batch_size]
+        vecs = model.encode(batch, show_progress_bar=False, convert_to_numpy=True)
+        all_vecs.extend(vecs.tolist())
+
+    return all_vecs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. VECTOR STORE (in-memory ChromaDB)
+# 4. VECTOR STORE (disk-backed ChromaDB)
 # ─────────────────────────────────────────────────────────────────────────────
-
+#
+# WHY PersistentClient, NOT chromadb.Client()
+#     chromadb.Client() is a purely in-memory, ephemeral store — every
+#     vector for every document ever indexed lives in this process's RAM
+#     for as long as the server runs, with nothing ever evicted. That's
+#     invisible for one small test PDF, but it means server RAM — not
+#     any per-file limit — was the real ceiling on how much you could
+#     index in total: a handful of large PDFs across a session could
+#     exhaust memory even though no single upload was "too big."
+#
+#     PersistentClient writes collections to disk (DuckDB+Parquet under
+#     the hood) and only pages what it needs into memory for a query, so
+#     indexing more/larger documents grows disk usage, not an
+#     ever-climbing RAM baseline. It also means indexed documents survive
+#     a server restart — previously, a restart silently dropped every
+#     collection with no warning, since _collections was pure in-memory
+#     process state.
+#
+# CHROMA_PERSIST_DIR
+#     Set this in .env to control where the on-disk index lives (defaults
+#     to ./chroma_data next to this file). On Render/most PaaS this
+#     should point at a persistent disk/volume if you want documents to
+#     survive a redeploy — an ephemeral filesystem still means "persists
+#     until the container recycles," which is a real improvement over
+#     "persists until any code path restarts the process," but isn't the
+#     same as durable storage.
 _chroma_client = None
 _collections: dict[str, object] = {}
+_CHROMA_PERSIST_DIR = os.environ.get(
+    "CHROMA_PERSIST_DIR",
+    str(Path(__file__).resolve().parent / "chroma_data"),
+)
+
 
 def get_chroma_client():
     global _chroma_client
@@ -240,15 +293,16 @@ def get_chroma_client():
             raise ImportError(
                 "chromadb not installed.\nRun: pip install chromadb"
             )
-        _chroma_client = chromadb.Client(
-            Settings(anonymized_telemetry=False)
+        _chroma_client = chromadb.PersistentClient(
+            path=_CHROMA_PERSIST_DIR,
+            settings=Settings(anonymized_telemetry=False),
         )
     return _chroma_client
 
 
 def build_collection(doc_id: str, chunks: list[dict], embeddings: list[list[float]]):
     """
-    Create (or recreate) an in-memory ChromaDB collection for this document.
+    Create (or recreate) this document's on-disk ChromaDB collection.
     doc_id should be a stable identifier (e.g. filename hash).
     """
     client = get_chroma_client()
@@ -263,20 +317,49 @@ def build_collection(doc_id: str, chunks: list[dict], embeddings: list[list[floa
         name=doc_id,
         metadata={"hnsw:space": "cosine"},
     )
-    collection.add(
-        ids        = [c["id"] for c in chunks],
-        documents  = [c["text"] for c in chunks],
-        embeddings = embeddings,
-        metadatas  = [{"index": c["index"]} for c in chunks],
-    )
+
+    # Batched for the same reason embed_chunks() is: a single add() with
+    # thousands of rows (a large PDF's worth of chunks) is one big
+    # memory spike, and Chroma's own client enforces a max batch size
+    # per add() call — a large-enough document could exceed that limit
+    # outright, not just be slow.
+    add_batch_size = 256
+    ids = [c["id"] for c in chunks]
+    docs = [c["text"] for c in chunks]
+    metas = [{"index": c["index"]} for c in chunks]
+    for start in range(0, len(chunks), add_batch_size):
+        end = start + add_batch_size
+        collection.add(
+            ids        = ids[start:end],
+            documents  = docs[start:end],
+            embeddings = embeddings[start:end],
+            metadatas  = metas[start:end],
+        )
     _collections[doc_id] = collection
     return collection
 
 
 def get_collection(doc_id: str):
+    """Returns the in-process cache hit if we have one, otherwise
+    re-opens the collection from disk via the persistent client — this
+    is the part that only matters now that storage survives a restart:
+    with the old ephemeral Client(), a cache miss meant the data was
+    truly gone, so raising KeyError immediately was correct. Now a miss
+    just means this worker process didn't happen to index it, and the
+    collection may still exist on disk (e.g. a different worker indexed
+    it, or this process restarted) — worth a real lookup before giving
+    up and telling the user to re-index."""
     if doc_id in _collections:
         return _collections[doc_id]
-    raise KeyError(f"No collection found for doc_id={doc_id}. Re-index the document.")
+
+    client = get_chroma_client()
+    try:
+        collection = client.get_collection(name=doc_id)
+    except Exception:
+        raise KeyError(f"No collection found for doc_id={doc_id}. Re-index the document.")
+
+    _collections[doc_id] = collection
+    return collection
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -304,9 +387,22 @@ def retrieve(doc_id: str, query: str, top_k: int = 5) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_rag_prompt(query: str, chunks: list[str], doc_name: str) -> str:
+    # AI SECURITY: these chunks are raw text pulled straight from a
+    # user-uploaded document — the single least controlled input this
+    # app handles (unlike a CSV's structured columns, a PDF/DOCX can
+    # contain arbitrary free text an attacker fully controls). Redact
+    # likely PII per-chunk before joining, then fence the whole context
+    # block as untrusted data so embedded text that reads like an
+    # instruction ("ignore previous instructions...") can't be followed
+    # as one. See pii_redaction.py / prompt_injection_guard.py module
+    # docstrings for the full reasoning.
+    from pii_redaction import redact_pii_logged
+    from prompt_injection_guard import wrap_untrusted
     context = "\n\n---\n\n".join(
-        f"[Passage {i+1}]\n{chunk}" for i, chunk in enumerate(chunks)
+        f"[Passage {i+1}]\n{redact_pii_logged(chunk, context=f'RAG passage {i+1}')}"
+        for i, chunk in enumerate(chunks)
     )
+    context = wrap_untrusted(context, source_label=f'document "{doc_name}"')
     return f"""You are an expert document analyst. You have been given relevant passages from a document called "{doc_name}".
 
 RETRIEVED PASSAGES:
@@ -324,10 +420,15 @@ Instructions:
 
 
 def build_insight_extraction_prompt(chunks: list[str], doc_name: str) -> str:
+    # Same redact-then-fence treatment as build_rag_prompt above.
+    from pii_redaction import redact_pii_logged
+    from prompt_injection_guard import wrap_untrusted
     # Use first 8 chunks for overview — enough for a 3B model context window
     sample = "\n\n---\n\n".join(
-        f"[Passage {i+1}]\n{chunk}" for i, chunk in enumerate(chunks[:8])
+        f"[Passage {i+1}]\n{redact_pii_logged(chunk, context=f'RAG insight passage {i+1}')}"
+        for i, chunk in enumerate(chunks[:8])
     )
+    sample = wrap_untrusted(sample, source_label=f'document "{doc_name}"')
     return f"""You are a senior analyst. Read the following passages from "{doc_name}" and extract the most important insights.
 
 DOCUMENT PASSAGES:

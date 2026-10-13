@@ -91,6 +91,11 @@ def build_dataset_profile(dataframe: pd.DataFrame, _cache_key: str = "") -> dict
 
 
 def format_profile_for_llm(profile: dict) -> str:
+    # AI SECURITY: names/addresses have no regex pattern, so columns whose
+    # NAME says they hold personal data have their values withheld from
+    # the prompt entirely (see pii_redaction.withhold_personal_in_profile).
+    from pii_redaction import withhold_personal_in_profile
+    profile = withhold_personal_in_profile(profile)
     lines = [f"Dataset: {profile['rows']:,} rows × {profile['columns']} columns"]
 
     if profile.get("nulls"):
@@ -127,7 +132,22 @@ def format_profile_for_llm(profile: dict) -> str:
         for col, n in profile["outliers"].items():
             lines.append(f"  {col}: {n} outlier(s)")
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+
+    # AI SECURITY: this text embeds real category values (top_categories,
+    # up to 6 columns) straight from the uploaded file into a prompt sent
+    # to a third-party LLM (Groq). Redact likely PII before it ever
+    # leaves this process — see pii_redaction.py's module docstring for
+    # why this is the right choke point (every caller of this function
+    # gets the protection for free, no per-call-site changes needed).
+    from pii_redaction import redact_pii_logged
+    text = redact_pii_logged(text, context="dataset profile (insights)")
+
+    # AI SECURITY: fence the whole profile as untrusted data so a
+    # crafted category value can't be read by the model as an
+    # instruction — see prompt_injection_guard.py's module docstring.
+    from prompt_injection_guard import wrap_untrusted
+    return wrap_untrusted(text, source_label="dataset profile")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -324,6 +344,8 @@ def build_defect_profile(dataframe: pd.DataFrame, low_cardinality_max: int = 50)
 
 
 def format_defect_profile_for_llm(profile: dict) -> str:
+    from pii_redaction import withhold_personal_in_profile
+    profile = withhold_personal_in_profile(profile)
     lines = [f"Dataset: {profile['rows']:,} rows × {profile['columns']} columns", ""]
 
     if profile["nulls"]:
@@ -359,7 +381,22 @@ def format_defect_profile_for_llm(profile: dict) -> str:
             lines.append(f"  {col}: {values_str}{note}")
         lines.append("")
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+
+    # AI SECURITY: this is the WIDEST data-exposure surface in the app —
+    # unlike format_profile_for_llm's 6-column/top-5 cap, this function
+    # deliberately shows EVERY column and EVERY distinct value for
+    # low-cardinality columns (that's its whole point, see
+    # build_defect_profile's docstring), so a customer-list or HR-export
+    # style dataset would send real emails/phone numbers/IDs straight to
+    # the LLM without this. Same redact-then-fence pattern as
+    # format_profile_for_llm above — see pii_redaction.py and
+    # prompt_injection_guard.py's module docstrings.
+    from pii_redaction import redact_pii_logged
+    text = redact_pii_logged(text, context="defect profile (cleaning agent)")
+
+    from prompt_injection_guard import wrap_untrusted
+    return wrap_untrusted(text, source_label="defect profile")
 
 
 def build_defect_diagnosis_prompt(profile_str: str) -> str:

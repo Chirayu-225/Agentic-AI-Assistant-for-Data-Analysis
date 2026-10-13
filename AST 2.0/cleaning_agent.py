@@ -165,7 +165,8 @@ def run_cleaning_agent(
         from query_engine import llm_with_fallback
         from sandbox_limits import run_sandboxed
 
-        df_rule_cleaned, rule_log = rule_based_clean(df_raw)
+        from cache_layer import cached_rule_clean
+        df_rule_cleaned, rule_log = cached_rule_clean(df_raw, csv_bytes, rule_based_clean)
 
         before = {
             "rows": len(df_raw),

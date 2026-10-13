@@ -47,13 +47,16 @@ WHY NOT AUTOMATIC JOIN-KEY DETECTION BEYOND "SAME COLUMN NAME"
 
 from __future__ import annotations
 
+import io
+import os
 import re
+import tempfile
 
 import numpy as np
 import pandas as pd
 
 from cleaning import rule_based_clean
-from file_reader import read_tabular_file
+from file_reader import read_tabular_file, should_use_large_csv_path, MAX_RESULT_ROWS
 
 
 def _json_safe(value):
@@ -70,9 +73,18 @@ def _json_safe(value):
     return value
 
 
-def _records(df: pd.DataFrame) -> list[dict]:
+def _records(df: pd.DataFrame, max_rows: int = MAX_RESULT_ROWS) -> tuple[list[dict], int, bool]:
+    """Returns (records, total_row_count, truncated) — same cap and same
+    rationale as analysis_service._dataframe_to_records: a join can fan
+    out to far more rows than either input table had, so this is at
+    least as likely to matter here as on the single-dataset path."""
+    total = len(df)
+    truncated = total > max_rows
+    if truncated:
+        df = df.head(max_rows)
     df = df.where(pd.notnull(df), None)
-    return [{k: _json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
+    records = [{k: _json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
+    return records, total, truncated
 
 
 def sanitize_alias(raw_alias: str, fallback: str) -> str:
@@ -102,13 +114,25 @@ def _find_likely_join_keys(named_dfs: dict[str, pd.DataFrame]) -> list[str]:
     ]
 
 
-def _build_schema_text(named_dfs: dict[str, pd.DataFrame]) -> str:
+def _build_schema_text(named_dfs: dict[str, pd.DataFrame], large_aliases: frozenset[str] = frozenset()) -> str:
+    """`named_dfs` may hold a SAMPLE DataFrame (not the real, full table)
+    for any alias in `large_aliases` — see run_multi_table_query's large-
+    file branch. len(df) would silently print the sample's row count as
+    if it were the real one in that case, so it's called out explicitly
+    instead of just being wrong."""
     sections = []
     for alias, df in named_dfs.items():
         cols = ", ".join(f"{c} ({df[c].dtype})" for c in df.columns)
-        sample = df.head(3).to_dict(orient="records")
+        # AI SECURITY: real sample rows -> prompt. Withhold personal-named
+        # columns here; the whole schema block is redacted + fenced below.
+        from pii_redaction import mask_personal_columns
+        sample = mask_personal_columns(df.head(3)).to_dict(orient="records")
+        row_count_text = (
+            f"large file, exact row count not loaded — schema/sample only"
+            if alias in large_aliases else f"{len(df)} rows"
+        )
         sections.append(
-            f"TABLE '{alias}' ({len(df)} rows):\n"
+            f"TABLE '{alias}' ({row_count_text}):\n"
             f"  columns: {cols}\n"
             f"  sample rows: {sample}"
         )
@@ -118,7 +142,13 @@ def _build_schema_text(named_dfs: dict[str, pd.DataFrame]) -> str:
         "\nLikely join keys (identical column name across tables):\n  " + "\n  ".join(join_keys)
         if join_keys else ""
     )
-    return "\n\n".join(sections) + join_key_text
+    from pii_redaction import redact_pii_logged
+    from prompt_injection_guard import wrap_untrusted
+    text = "\n\n".join(sections) + join_key_text
+    return wrap_untrusted(
+        redact_pii_logged(text, context="multi-table schema and sample rows"),
+        source_label="multi-table schema and sample rows",
+    )
 
 
 def build_multi_table_prompt(schema_text: str, query: str) -> str:
@@ -166,76 +196,162 @@ def _parse_sql_response(raw: str) -> tuple[str, str]:
 def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> dict:
     """
     datasets: [{"alias": str, "csv_bytes": bytes, "filename": str}, ...]
-    Each file is read + rule-cleaned exactly like any single-CSV
-    upload — no different treatment for being part of a join.
+
+    Each dataset is routed individually, on its own size — a join isn't
+    "small" or "large" as a whole, one table in it can be either:
+      - CSV/TXT over file_reader.LARGE_FILE_THRESHOLD_BYTES: never
+        pd.read_csv()'d. Written to a temp file and handed to the sandbox
+        as a file path — sandbox_limits.run_multi_table_mixed_sql_sandboxed
+        loads it via DuckDB's own CSV engine inside the worker, exactly
+        like the single-dataset large-file path
+        (sandbox_limits.run_large_csv_sql_sandboxed). Before this, EVERY
+        dataset in a join went through read_tabular_file() regardless of
+        size, so one large table in a join hit the same ceiling the
+        large-file path exists to remove from single-dataset analysis —
+        this was the actual gap, not something this function's small-file
+        branch below ever had.
+      - Everything else (small CSV/TXT, or any XLSX/XLS — Excel has no
+        out-of-core engine here, see file_reader.py's module docstring,
+        so it always takes this branch regardless of size): read fully
+        via read_tabular_file() and rule-cleaned, same as any single-CSV
+        upload, exactly as before.
+
+    Rule-based cleaning only runs on the small-file branch, deliberately
+    consistent with analysis_service._run_large_csv_analysis, which
+    doesn't run it either: cleaning here means rule_based_clean() over a
+    full pandas DataFrame, which is exactly the cost the large-file
+    branch exists to avoid paying. Not a silent gap — a large table
+    joining alongside a cleaned small one may still have the raw currency
+    symbols/inconsistent categories rule_based_clean() would otherwise
+    fix; a real, documented trade-off (see file_reader.py's own README-
+    referenced "Known Limitations"), not something to paper over here.
     """
     if len(datasets) < 2:
         return {"success": False, "error": "At least 2 datasets are needed for a multi-table query."}
 
-    named_dfs: dict[str, pd.DataFrame] = {}
+    dataframe_tables: dict[str, pd.DataFrame] = {}
+    file_tables: dict[str, str] = {}          # alias -> temp file path, large CSV/TXT only
+    schema_dfs: dict[str, pd.DataFrame] = {}  # alias -> full df (small) or small SAMPLE df (large)
+    large_aliases: set[str] = set()
+    tmp_paths: list[str] = []
     used_aliases: set[str] = set()
-    for i, ds in enumerate(datasets):
-        alias = sanitize_alias(ds["alias"], fallback=f"table_{i+1}")
-        # Guard against two datasets sanitizing to the same alias
-        # (e.g. "Orders!" and "orders?" both -> "orders") silently
-        # overwriting one another.
-        original_alias = alias
-        suffix = 2
-        while alias in used_aliases:
-            alias = f"{original_alias}_{suffix}"
-            suffix += 1
-        used_aliases.add(alias)
-
-        try:
-            df = read_tabular_file(ds["csv_bytes"], ds["filename"])
-            df, _ = rule_based_clean(df)
-        except Exception as e:
-            return {"success": False, "error": f"Could not parse '{ds['filename']}': {e}"}
-        named_dfs[alias] = df
 
     try:
-        from query_engine import llm_with_fallback
-        from sandbox_limits import run_sql_sandboxed
+        for i, ds in enumerate(datasets):
+            alias = sanitize_alias(ds["alias"], fallback=f"table_{i+1}")
+            # Guard against two datasets sanitizing to the same alias
+            # (e.g. "Orders!" and "orders?" both -> "orders") silently
+            # overwriting one another.
+            original_alias = alias
+            suffix = 2
+            while alias in used_aliases:
+                alias = f"{original_alias}_{suffix}"
+                suffix += 1
+            used_aliases.add(alias)
 
-        schema_text = _build_schema_text(named_dfs)
-        prompt = build_multi_table_prompt(schema_text, query)
-        raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
-        reasoning, code = _parse_sql_response(raw)
+            csv_bytes, filename = ds["csv_bytes"], ds["filename"]
 
-        if not code:
-            print(f"[multi-table] no code block parsed. Raw response:\n{raw}", flush=True)
+            if should_use_large_csv_path(csv_bytes, filename):
+                ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "csv"
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+                        tmp.write(csv_bytes)
+                        tmp_path = tmp.name
+                    tmp_paths.append(tmp_path)
+
+                    # Schema-only sample — same bounded, pandas-based
+                    # technique as analysis_service._run_large_csv_analysis;
+                    # the real query still runs against the whole file,
+                    # via file_tables below, never this sample.
+                    try:
+                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20)
+                    except UnicodeDecodeError:
+                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, encoding="latin1")
+                except Exception as e:
+                    return {"success": False, "error": f"Could not read '{filename}': {e}"}
+
+                file_tables[alias] = tmp_path
+                schema_dfs[alias] = sample_df
+                large_aliases.add(alias)
+            else:
+                try:
+                    df = read_tabular_file(csv_bytes, filename)
+                    from cache_layer import cached_rule_clean
+                    df, _ = cached_rule_clean(df, csv_bytes, rule_based_clean)
+                except Exception as e:
+                    return {"success": False, "error": f"Could not parse '{filename}': {e}"}
+                dataframe_tables[alias] = df
+                schema_dfs[alias] = df
+
+        try:
+            from query_engine import llm_with_fallback
+            from sandbox_limits import run_multi_table_mixed_sql_sandboxed, DEFAULT_MEMORY_MB, LARGE_FILE_MEMORY_MB
+
+            all_aliases = list(schema_dfs.keys())  # preserves original dataset order across both branches
+            schema_text = _build_schema_text(schema_dfs, large_aliases=frozenset(large_aliases))
+            prompt = build_multi_table_prompt(schema_text, query)
+            raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
+            reasoning, code = _parse_sql_response(raw)
+
+            if not code:
+                print(f"[multi-table] no code block parsed. Raw response:\n{raw}", flush=True)
+                return {
+                    "success": False,
+                    "error": "Could not generate a SQL query for this question — try again.",
+                    "tables": all_aliases,
+                }
+
+            # run_multi_table_mixed_sql_sandboxed's own default memory_mb
+            # is LARGE_FILE_MEMORY_MB — right when file_tables is
+            # non-empty, but a join with no large files at all is
+            # ordinary, small-file work that deserves the SAME tight
+            # DEFAULT_MEMORY_MB safety net run_sql_sandboxed always used
+            # for it — passed explicitly here rather than silently
+            # widening the ceiling for every join just because this
+            # function is also able to handle large ones.
+            memory_mb = LARGE_FILE_MEMORY_MB if file_tables else DEFAULT_MEMORY_MB
+            sbr = run_multi_table_mixed_sql_sandboxed(code, dataframe_tables, file_tables, memory_mb=memory_mb)
+
+            if not sbr.success:
+                return {
+                    "success": False,
+                    "error": sbr.error,
+                    "reasoning": reasoning,
+                    "tables": all_aliases,
+                }
+
+            if not sbr.produced or not isinstance(sbr.value, pd.DataFrame):
+                return {
+                    "success": False,
+                    "error": "The query did not return a table — try rephrasing the question.",
+                    "reasoning": reasoning,
+                    "tables": all_aliases,
+                }
+
+            records, total_rows, truncated = _records(sbr.value)
             return {
-                "success": False,
-                "error": "Could not generate a SQL query for this question — try again.",
-                "tables": list(named_dfs.keys()),
-            }
-
-        sbr = run_sql_sandboxed(code, named_dfs)
-
-        if not sbr.success:
-            return {
-                "success": False,
-                "error": sbr.error,
+                "success": True,
                 "reasoning": reasoning,
-                "tables": list(named_dfs.keys()),
+                "tables": all_aliases,
+                "resultType": "table",
+                "resultData": records,
+                # rowCount stays "rows actually in resultData" (matches what
+                # MultiTableTab.tsx already renders as "{rowCount} ROW(S)" —
+                # no frontend change needed for this to stay accurate even
+                # once a join fans out past MAX_RESULT_ROWS). totalRowCount/
+                # truncated are new, additive fields for a frontend that
+                # wants to show "X of Y" later.
+                "rowCount": len(records),
+                "totalRowCount": total_rows,
+                "truncated": truncated,
+                "columns": list(sbr.value.columns),
             }
-
-        if not sbr.produced or not isinstance(sbr.value, pd.DataFrame):
-            return {
-                "success": False,
-                "error": "The query did not return a table — try rephrasing the question.",
-                "reasoning": reasoning,
-                "tables": list(named_dfs.keys()),
-            }
-
-        return {
-            "success": True,
-            "reasoning": reasoning,
-            "tables": list(named_dfs.keys()),
-            "resultType": "table",
-            "resultData": _records(sbr.value),
-            "rowCount": len(sbr.value),
-            "columns": list(sbr.value.columns),
-        }
-    except Exception as e:
-        return {"success": False, "error": f"Multi-table query failed: {e}"}
+        except Exception as e:
+            return {"success": False, "error": f"Multi-table query failed: {e}"}
+    finally:
+        # Large-file datasets each got their own temp file above (mirrors
+        # analysis_service._run_large_csv_analysis's own cleanup) — clean
+        # up regardless of which return path was taken, success or error.
+        for tmp_path in tmp_paths:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)

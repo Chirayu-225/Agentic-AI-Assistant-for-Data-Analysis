@@ -43,6 +43,25 @@ try:
 except ImportError:
     px = go = None
 
+# AI SECURITY — see _wrap()'s docstring below for the full story: these
+# are the intermediate object types df.groupby()/.rolling()/.expanding()
+# return, which _wrap() must ALSO proxy (a real sandbox-escape bug found
+# by test_sandbox_security.py, fixed here). Prefer the public
+# pandas.api.typing namespace (stable since pandas 2.1); fall back to the
+# private pandas.core.* path for pandas 2.0.x, which predates it — same
+# defensive-import pattern already used above for optional plt/px/go.
+try:
+    from pandas.api.typing import DataFrameGroupBy, SeriesGroupBy, Rolling, Expanding
+except ImportError:
+    from pandas.core.groupby import DataFrameGroupBy, SeriesGroupBy
+    from pandas.core.window import Rolling, Expanding
+
+# Anything reachable through an ALLOWED_FRAME_METHODS call
+# (groupby/rolling/expanding) that is NOT itself a terminal DataFrame/
+# Series result. Every one of these needs the exact same proxying as a
+# DataFrame/Series — see _wrap().
+_CHAINABLE_TYPES = (DataFrameGroupBy, SeriesGroupBy, Rolling, Expanding)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # ALLOWLISTS
@@ -140,8 +159,28 @@ def _is_figure(obj) -> bool:
 
 
 def _wrap(obj):
-    """Wrap a value returned from an allowed call, if it needs gating."""
+    """Wrap a value returned from an allowed call, if it needs gating.
+
+    AI SECURITY — real bug found and fixed here (via
+    test_sandbox_security.py): this used to check ONLY
+    isinstance(obj, (pd.DataFrame, pd.Series)). But df.groupby(...) —
+    itself an ALLOWED_FRAME_METHODS entry — returns a DataFrameGroupBy,
+    not a DataFrame. That object was never a DataFrame/Series, so it
+    fell through this check entirely and was returned to generated code
+    completely UNWRAPPED — meaning `df.groupby('x').sum().to_pickle(...)`
+    (or .to_csv, or anything else off the allowlist) executed with ZERO
+    restriction the instant a .groupby()/.rolling()/.expanding() call
+    was in the chain, silently bypassing the entire proxy system for
+    what is likely the single most common pattern in this app's
+    LLM-generated code. _CHAINABLE_TYPES (defined above) closes this —
+    every intermediate object type these three allowed methods can
+    return is now wrapped exactly like a DataFrame/Series, using the
+    SAME _FrameProxy class and the SAME allowlist, since the same
+    methods (sum/mean/agg/apply/...) are the legitimate operations on
+    both a DataFrame and a GroupBy/Rolling/Expanding object."""
     if isinstance(obj, (pd.DataFrame, pd.Series)):
+        return _FrameProxy(obj)
+    if isinstance(obj, _CHAINABLE_TYPES):
         return _FrameProxy(obj)
     if _is_figure(obj):
         return _FigureProxy(obj)
@@ -158,7 +197,11 @@ def _unwrap_args(args, kwargs):
 
 
 class _FrameProxy:
-    """Wraps a DataFrame/Series so only allowlisted methods/attrs are reachable."""
+    """Wraps a DataFrame/Series — or a GroupBy/Rolling/Expanding object
+    from an in-progress .groupby()/.rolling()/.expanding() chain, see
+    _CHAINABLE_TYPES and _wrap()'s docstring — so only allowlisted
+    methods/attrs are reachable regardless of which of those the
+    underlying object actually is."""
 
     __slots__ = ("_obj",)
 

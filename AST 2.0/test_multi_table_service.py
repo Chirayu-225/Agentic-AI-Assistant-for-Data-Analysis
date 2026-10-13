@@ -28,10 +28,28 @@ Run: python3 test_multi_table_service.py
 
 import pandas as pd
 
-from multi_table_service import sanitize_alias, _find_likely_join_keys, _parse_sql_response
+from multi_table_service import sanitize_alias, _find_likely_join_keys, _parse_sql_response, _records
 from sandbox_limits import run_sql_sandboxed
 
 print("=" * 70)
+print("PART 0 — result-size cap (MAX_RESULT_ROWS) — a join can fan out")
+print("well past either input table's row count, so this matters here")
+print("at least as much as on the single-dataset path")
+print("=" * 70)
+
+big_join_result = pd.DataFrame({"n": range(9000)})
+capped_records, total_rows, was_truncated = _records(big_join_result, max_rows=5000)
+assert len(capped_records) == 5000, f"expected exactly 5000 records, got {len(capped_records)}"
+assert total_rows == 9000, f"total should reflect the FULL uncapped row count, got {total_rows}"
+assert was_truncated is True
+small_result = pd.DataFrame({"n": range(3)})
+small_records, small_total, small_truncated = _records(small_result, max_rows=5000)
+assert len(small_records) == 3 and small_total == 3 and small_truncated is False
+print(f"[OK] a 9,000-row join result caps to {len(capped_records)} records "
+      f"(totalRowCount={total_rows}, truncated={was_truncated}); "
+      f"a small result is left untouched and correctly reports truncated=False")
+
+print("\n" + "=" * 70)
 print("PART 1 — alias sanitization")
 print("=" * 70)
 

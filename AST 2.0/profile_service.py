@@ -72,6 +72,17 @@ def _schema(df: pd.DataFrame) -> list[dict]:
     ]
 
 
+def _pii_report(df) -> dict | None:
+    """Never lets a scanning problem break profiling — the report is an
+    extra, not part of the contract the rest of the profile depends on."""
+    try:
+        from pii_redaction import scan_dataframe
+        return scan_dataframe(df)
+    except Exception as e:
+        print(f"[profile] PII scan failed (continuing without it): {e}", flush=True)
+        return None
+
+
 def get_profile(csv_bytes: bytes, filename: str, preview_rows: int = 10) -> dict:
     """Raw, pre-cleaning profile — matches what a user should see the
     instant a file finishes uploading, before anything has been altered."""
@@ -91,6 +102,9 @@ def get_profile(csv_bytes: bytes, filename: str, preview_rows: int = 10) -> dict
             "schema": _schema(df),
             "preview": _records(df.head(preview_rows)),
             "previewCount": min(preview_rows, len(df)),
+            # What the user sees BEFORE anything is sent to an LLM: which
+            # columns look like personal data and how they will be treated.
+            "piiReport": _pii_report(df),
         }
     except Exception as e:
         return {"success": False, "error": f"Profiling failed: {e}"}
@@ -116,7 +130,8 @@ def get_cleaning_report(csv_bytes: bytes, filename: str, preview_rows: int = 10)
     try:
         from cleaning import rule_based_clean
 
-        df_clean, log = rule_based_clean(df_raw)
+        from cache_layer import cached_rule_clean
+        df_clean, log = cached_rule_clean(df_raw, csv_bytes, rule_based_clean)
 
         return {
             "success": True,

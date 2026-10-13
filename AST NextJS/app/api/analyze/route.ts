@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeCsv } from "@/lib/pythonClient";
+import { analyzeCsv, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -43,9 +43,6 @@ export async function POST(request: NextRequest) {
     // A failure here is almost always the Python service being
     // unreachable, timed out, or rejecting the shared-secret header —
     // not a user error, so don't imply the query itself was wrong.
-    return NextResponse.json(
-      { error: `Analysis service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Analysis service unavailable");
   }
 }

@@ -1,11 +1,13 @@
 /**
- * app/api/clean/route.ts — runs the cleaning engine and returns a
- * before/after report, making the cleaning step visible instead of the
- * silent pre-pass it was before. Mirrors app/api/analyze/route.ts.
+ * app/api/clean/agent/route.ts — triggers the LLM-driven cleaning agent
+ * for nulls rule-based cleaning couldn't resolve. Explicitly separate
+ * from /api/clean (which is free, instant, deterministic) since this
+ * costs a real LLM call and isn't perfectly deterministic — the user
+ * should knowingly opt in, not have it run automatically.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getCleaningReport } from "@/lib/pythonClient";
+import { runCleaningAgent, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -14,22 +16,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { fileUrl, filename } = body as Record<string, unknown>;
+  const { fileUrl, filename, sessionId } = body as Record<string, unknown>;
 
-  if (typeof fileUrl !== "string" || typeof filename !== "string") {
+  if (
+    typeof fileUrl !== "string" ||
+    typeof filename !== "string" ||
+    typeof sessionId !== "string"
+  ) {
     return NextResponse.json(
-      { error: "fileUrl and filename are both required strings" },
+      { error: "fileUrl, filename, and sessionId are all required strings" },
       { status: 400 }
     );
   }
 
   try {
-    const result = await getCleaningReport({ fileUrl, filename });
+    const result = await runCleaningAgent({ fileUrl, filename, sessionId });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: `Cleaning service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Cleaning agent service unavailable");
   }
 }

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { queryDocument } from "@/lib/pythonClient";
+import { queryDocument, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -34,9 +34,6 @@ export async function POST(request: NextRequest) {
     const result = await queryDocument({ docId, filename, query });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: `Query service unavailable: ${(err as Error).message}` },
-      { status: 502 }
-    );
+    return upstreamErrorResponse(err, "Query service unavailable");
   }
 }

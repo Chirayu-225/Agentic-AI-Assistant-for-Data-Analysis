@@ -29,6 +29,7 @@ pypdf>=4.0.0
 python-docx>=1.1.0
 pdfplumber>=0.11.0  # table extraction from PDFs — see table_extraction.py
 duckdb>=1.0.0  # SQL engine for multi-dataset joins — see multi_table_service.py
+pyarrow>=14.0.0  # Arrow handoff for the large-CSV DuckDB-native path — see sandbox_limits.run_large_csv_sql_sandboxed
 
 # ── Env vars ──────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0

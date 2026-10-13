@@ -64,11 +64,31 @@ def main():
         "sales": [np.int64(1200), np.int64(2500)],
         "rating": [np.float64(4.5), None],
     })
-    records = _dataframe_to_records(df)
-    print(f"records: {records}")
+    records, total, truncated = _dataframe_to_records(df)
+    print(f"records: {records}  (total={total}, truncated={truncated})")
     assert records[0]["sales"] == 1200 and isinstance(records[0]["sales"], int), "int64 not converted"
     assert records[1]["rating"] is None, "null not converted to None"
+    assert total == 2 and truncated is False, "small df should report its true total and not be marked truncated"
     print("[OK] DataFrame converts cleanly to JSON-safe records")
+
+    print("\n" + "=" * 70)
+    print("PART 2b — result-size cap (MAX_RESULT_ROWS)")
+    print("=" * 70)
+
+    big_df = pd.DataFrame({"n": range(12000)})
+    capped_records, capped_total, capped_truncated = _dataframe_to_records(big_df, max_rows=5000)
+    assert len(capped_records) == 5000, f"expected exactly 5000 records, got {len(capped_records)}"
+    assert capped_total == 12000, f"total should reflect the FULL uncapped row count, got {capped_total}"
+    assert capped_truncated is True
+    print(f"[OK] a 12,000-row result caps to {len(capped_records)} records, "
+          f"reports totalRowCount={capped_total}, truncated={capped_truncated}")
+
+    shaped_big = _shape_result(big_df)
+    assert shaped_big["rowCount"] == 5000
+    assert shaped_big["totalRowCount"] == 12000
+    assert shaped_big["truncated"] is True
+    assert len(shaped_big["resultData"]) == 5000
+    print("[OK] _shape_result() surfaces rowCount/totalRowCount/truncated for a table result")
 
     print("\n" + "=" * 70)
     print("PART 3 — result shaping by type")
