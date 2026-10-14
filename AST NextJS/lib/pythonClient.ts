@@ -15,10 +15,20 @@
  *   dependency for the corresponding check.
  */
 
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL?.replace(/\/+$/, "");
 const PYTHON_SERVICE_SECRET = process.env.PYTHON_SERVICE_SECRET;
+
+// Non-reversible fingerprint (first 8 hex chars of SHA-256) so you can confirm the
+// frontend and backend hold the same secret without printing it.
+console.log(
+  "[pythonClient] PYTHON_SERVICE_SECRET fingerprint:",
+  PYTHON_SERVICE_SECRET
+    ? createHash("sha256").update(PYTHON_SERVICE_SECRET).digest("hex").slice(0, 8)
+    : "NOT SET"
+);
 
 if (!PYTHON_SERVICE_URL || !PYTHON_SERVICE_SECRET) {
   // Fails loudly at import time in dev rather than silently 500ing later.
@@ -254,7 +264,7 @@ export function getDocumentInsights(req: RagInsightsRequest): Promise<RagInsight
 // real time to parse (that same workbook's winning sheet alone: ~24s) —
 // this constant gives that genuine parse time headroom instead of
 // assuming a CSV-speed read.
-const FILE_READ_TIMEOUT_MS = 60_000;
+const FILE_READ_TIMEOUT_MS = 150_000; // large Excel workbooks can take 60s+ to parse; was 60_000
 
 export function getProfile(req: ProfileRequest): Promise<ProfileResponse> {
   return callPythonService<ProfileResponse>("/profile", req, FILE_READ_TIMEOUT_MS);

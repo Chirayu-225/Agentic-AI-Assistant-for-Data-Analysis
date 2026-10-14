@@ -32,7 +32,7 @@ import os
 import time
 
 from dotenv import load_dotenv
-load_dotenv()  # reads .env in this folder — see .env.example for what's needed
+load_dotenv(override=True)  # .env always wins over a stale shell variable (e.g. an old `set PYTHON_SERVICE_SECRET=...`); reads .env in this folder — see .env.example for what's needed
 
 import requests
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -51,6 +51,14 @@ import cache_layer
 import rate_limiter
 
 SERVICE_SECRET = os.environ.get("PYTHON_SERVICE_SECRET", "")
+
+def _fp(value: str) -> str:
+    """Short, non-reversible fingerprint so two sides can confirm they hold the
+    same secret without ever printing it."""
+    import hashlib
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8] if value else "none"
+
+print(f"[api] PYTHON_SERVICE_SECRET fingerprint: {_fp(SERVICE_SECRET) if SERVICE_SECRET else 'NOT SET'}", flush=True)
 # Was 15s — sized for small test CSVs, not for the 200MB nominal upload
 # ceiling this app actually advertises. On a realistic connection, a
 # large CSV or a multi-hundred-page PDF can legitimately take longer
@@ -193,6 +201,7 @@ def _check_secret(x_service_secret: str = Header(default="")) -> None:
     # how many leading characters of a guess were right.
     if not hmac.compare_digest(x_service_secret.encode("utf-8"), SERVICE_SECRET.encode("utf-8")):
         audit_log.record("auth_failure", reason="bad_or_missing_secret")
+        print(f"[api] auth rejected: client sent secret fingerprint {_fp(x_service_secret)}, server expects {_fp(SERVICE_SECRET)}", flush=True)
         raise HTTPException(status_code=401, detail="Invalid or missing service secret.")
 
 

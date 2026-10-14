@@ -1,12 +1,15 @@
 /**
- * app/api/auto-analyze/follow-up/route.ts — answers a follow-up question
- * about the insights already shown from Auto-Analyze. See
- * auto_analyze_service.answer_followup's docstring for the two-step
- * decide-then-answer design this exists to trigger.
+ * app/api/auto-analyze/route.ts — triggers the proactive dataset
+ * intelligence pipeline: up to 5 ranked business insights (each with a
+ * concrete action) plus up to 3 charts chosen specifically to make those
+ * insights visible at a glance. Explicitly separate from any automatic
+ * post-upload step — like /api/clean/agent, this costs several real LLM
+ * calls, so the user should knowingly opt in via the button rather than
+ * have it fire silently on every upload.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { askFollowUp, upstreamErrorResponse } from "@/lib/pythonClient";
+import { runAutoAnalyze, upstreamErrorResponse } from "@/lib/pythonClient";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -15,32 +18,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { fileUrl, filename, sessionId, insights, question, priorQa } = body as Record<string, unknown>;
+  const { fileUrl, filename, sessionId } = body as Record<string, unknown>;
 
   if (
     typeof fileUrl !== "string" ||
     typeof filename !== "string" ||
-    typeof sessionId !== "string" ||
-    typeof question !== "string" ||
-    !Array.isArray(insights)
+    typeof sessionId !== "string"
   ) {
     return NextResponse.json(
-      { error: "fileUrl, filename, sessionId, question (strings) and insights (array) are required" },
+      { error: "fileUrl, filename, and sessionId are all required strings" },
       { status: 400 }
     );
   }
 
   try {
-    const result = await askFollowUp({
-      fileUrl,
-      filename,
-      sessionId,
-      insights: insights as { finding: string; action: string }[],
-      question,
-      priorQa: Array.isArray(priorQa) ? (priorQa as { question: string; answer: string }[]) : [],
-    });
+    const result = await runAutoAnalyze({ fileUrl, filename, sessionId });
     return NextResponse.json(result);
   } catch (err) {
-    return upstreamErrorResponse(err, "Follow-up service unavailable");
+    return upstreamErrorResponse(err, "Auto-analyze service unavailable");
   }
 }

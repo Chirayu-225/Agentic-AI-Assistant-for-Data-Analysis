@@ -111,6 +111,7 @@ class QuestionResult:
     result_type: str = ""
     confidence: str = ""
     manual_seconds: Optional[float] = None
+    signature: str = ""      # answer VALUES only (no column names / formatting), used for repeat consistency
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -325,6 +326,29 @@ def _preview(result: dict, limit: int = 120) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
+def _norm_cell(v: Any) -> str:
+    if _is_number(v):
+        return f"{round(float(v), 4):g}"
+    parsed = _to_float(v) if isinstance(v, str) else None
+    if parsed is not None:
+        return f"{round(parsed, 4):g}"
+    return _norm_text(v)
+
+
+def _signature(result: dict) -> str:
+    """What the answer SAYS, ignoring how it is labelled: two runs that return
+    [{"region": "South", "units": 39}] and [{"region": "South", "total_units": 39}]
+    gave the same answer, so they must not count as inconsistent."""
+    rtype = result.get("resultType")
+    data = result.get("resultData")
+    if rtype == "scalar":
+        return _norm_cell(data)
+    if rtype == "table" and isinstance(data, list):
+        rows = [[_norm_cell(v) for v in row.values()] for row in data[:50] if isinstance(row, dict)]
+        return json.dumps(rows)
+    return f"[{rtype}]"
+
+
 def classify_failure(error: str) -> str:
     e = (error or "").lower()
     if e.startswith("security block"):
@@ -396,7 +420,12 @@ def run_eval(
         for run in range(1, repeat + 1):
             t0 = time.perf_counter()
             try:
-                out = solver(file_bytes, filename, q.question, session_id)
+                # A UNIQUE session id per (question, run): llm_provider caches
+                # generated code keyed on (model, prompt, session_id), so runs
+                # sharing a session id would replay the first run's code and
+                # make --repeat consistency trivially 100% without ever
+                # asking the model again.
+                out = solver(file_bytes, filename, q.question, f"{session_id}-{q.id}-run{run}")
                 exc = ""
             except Exception as e:  # a solver crash is a result, not a harness crash
                 out, exc = {}, f"{type(e).__name__}: {e}"
@@ -416,6 +445,8 @@ def run_eval(
                 res = QuestionResult(q.id, run, q.question, q.category, q.answer_type, q.expected, v.actual, v.correct,
                                      True, outcome, v.detail, latency, out.get("resultType", ""),
                                      out.get("confidence", ""), q.manual_seconds)
+            if res.executed:
+                res.signature = _signature(out)
             results.append(res)
             if on_result:
                 on_result(res)
@@ -470,7 +501,7 @@ def summarize(results: list[QuestionResult], repeat: int = 1) -> dict:
     if repeat > 1:
         per_q: dict[str, list[str]] = {}
         for r in results:
-            per_q.setdefault(r.id, []).append(r.actual if r.executed else f"<{r.outcome}>")
+            per_q.setdefault(r.id, []).append((r.signature or r.actual) if r.executed else f"<{r.outcome}>")
         agree = [max(vals.count(v) for v in set(vals)) / len(vals) for vals in per_q.values()]
         consistency = round(statistics.mean(agree), 3) if agree else None
 
@@ -622,6 +653,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"\nAccuracy {summary['accuracy'] * 100:.1f}% (95% interval {lo * 100:.1f}–{hi * 100:.1f}%), "
           f"execution success {summary['executionSuccess'] * 100:.1f}%, "
           f"median latency {summary['latencySeconds']['median']}s")
+    if summary.get("consistency") is not None:
+        print(f"Repeat consistency {summary['consistency'] * 100:.1f}% "
+              f"(mean share of runs per question that gave the same answer)")
     print(f"Report: {os.path.join(out_dir, 'report.md')}")
     return 0 if summary["accuracy"] == 1 else 1
 

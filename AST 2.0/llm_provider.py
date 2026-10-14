@@ -78,13 +78,29 @@ def _call(
     Raises on network/auth errors — callers handle fallback logic.
     """
     client = _get_client()
+    kwargs = {}
+    if model.startswith("openai/gpt-oss"):
+        # gpt-oss are reasoning models: hidden reasoning tokens count against
+        # max_tokens, so a small budget can be fully spent on reasoning and
+        # leave an EMPTY answer. Ask for low effort (via extra_body so older
+        # groq SDKs don't reject the argument).
+        kwargs["extra_body"] = {"reasoning_effort": "low"}
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
         max_tokens=max_tokens,
+        **kwargs,
     )
-    return resp.choices[0].message.content
+    choice = resp.choices[0]
+    text = choice.message.content or ""
+    if not text.strip():
+        print(f"[llm] empty answer from {model} (finish_reason={choice.finish_reason}, "
+              f"max_tokens={max_tokens})", flush=True)
+        raise RuntimeError(
+            f"Model returned an empty answer (finish_reason={choice.finish_reason}) — try again."
+        )
+    return text
 
 
 # ── Public interface — drop-in replacements for ollama.chat patterns ──────────
@@ -128,7 +144,7 @@ def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
     Uses the chat/reasoning model slot.
     """
     try:
-        return _call(prompt_text, temperature, _CHAT_MODEL, max_tokens=1024)
+        return _call(prompt_text, temperature, _CHAT_MODEL, max_tokens=4096)
     except Exception as e:
         raise RuntimeError(f"LLM chat call failed: {e}") from e
 

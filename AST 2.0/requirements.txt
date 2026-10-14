@@ -8,6 +8,7 @@ groq>=1.5.0
 pandas>=2.0.0
 numpy>=1.26.0
 openpyxl>=3.1.0  # required by pd.read_excel for .xlsx uploads — see file_reader.py
+python-calamine>=0.2.0  # fast Rust .xlsx reader (pandas >= 2.2); file_reader.py falls back to openpyxl if absent
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 plotly>=5.20.0

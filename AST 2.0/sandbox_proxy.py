@@ -61,6 +61,12 @@ except ImportError:
 # Series result. Every one of these needs the exact same proxying as a
 # DataFrame/Series — see _wrap().
 _CHAINABLE_TYPES = (DataFrameGroupBy, SeriesGroupBy, Rolling, Expanding)
+try:  # resample()/ewm() return these; they need the same proxying as groupby
+    from pandas.core.resample import Resampler as _Resampler
+    from pandas.core.window import ExponentialMovingWindow as _EWM
+    _CHAINABLE_TYPES = _CHAINABLE_TYPES + (_Resampler, _EWM)
+except ImportError:
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -89,7 +95,36 @@ ALLOWED_FRAME_METHODS = {
     "select_dtypes", "filter", "assign",
     "to_dict", "to_string", "to_numpy", "to_frame", "to_list", "tolist",
     "plot",  # matplotlib accessor — returns an Axes, no file I/O itself
+    # Added after the evaluation harness showed real model output failing on
+    # these. All are pure in-memory computation, no I/O, no expression eval:
+    "idxmax", "idxmin",          # "which region has the highest X" — the single most common idiom
+    "isin", "between",           # row filtering
+    "shift", "rank",             # time-series / ranking
+    "where", "mask",             # conditional replacement
+    "any", "all",                # boolean reductions
+    "transform",                 # group-wise transforms; lambdas are re-proxied (see _wrap_callable)
+    "size", "first", "last", "cumcount", "prod", "sem", "skew",  # groupby.size() etc. — pure in-memory
+    # Broad pass: every entry below is pure in-memory computation. Anything that
+    # touches files, the OS, expression strings (eval/query), Styler, or yields
+    # raw un-proxied rows (iterrows/items/itertuples) is deliberately absent.
+    "resample", "ewm", "asfreq", "to_period", "to_timestamp",
+    "ngroup", "nth", "get_group", "kurt", "kurtosis", "cumcount",
+    "argmax", "argmin", "squeeze", "explode", "stack", "unstack", "swaplevel",
+    "reindex", "truncate", "add_prefix", "add_suffix", "combine_first",
+    "equals", "memory_usage", "droplevel", "rename_axis", "infer_objects",
+    "convert_dtypes", "first_valid_index", "last_valid_index", "dot",
+    "eq", "ne", "lt", "le", "gt", "ge",
+    "add", "sub", "mul", "div", "truediv", "floordiv", "mod", "pow",
+    "radd", "rsub", "rmul", "rdiv", "rtruediv", "rfloordiv", "rmod", "rpow",
+    "product", "mad", "ptp", "idxmax", "idxmin", "autocorr", "nlargest",
+    "factorize", "searchsorted", "compare", "clip", "round",
+    "get", "keys", "agg", "median", "prod",
 }
+
+# Label/position indexers (df.loc / df.iloc / df.at / df.iat). These are NOT
+# returned raw: a raw indexer exposes `.obj`, which is the unproxied frame.
+# _IndexerProxy exposes only item get/set.
+INDEXER_ATTRS = {"loc", "iloc", "at", "iat"}
 
 # Attributes (not methods) safe to read directly.
 ALLOWED_FRAME_ATTRS = {
@@ -104,7 +139,12 @@ ALLOWED_PD_FUNCS = {
     "to_datetime", "to_numeric", "to_timedelta", "date_range",
     "isna", "isnull", "notna", "notnull", "cut", "qcut", "get_dummies",
     "NaT", "NA", "Timestamp", "Timedelta",
+    "crosstab", "factorize", "unique", "period_range", "timedelta_range",
+    "Period", "DateOffset", "Categorical", "CategoricalDtype", "Index",
+    "DatetimeIndex", "MultiIndex", "IntervalIndex", "Interval", "interval_range",
+    "wide_to_long", "pivot", "value_counts", "eval_placeholder_removed",
 }
+ALLOWED_PD_FUNCS.discard("eval_placeholder_removed")
 
 # Top-level numpy functions safe to call.
 # Excludes np.load/save/fromfile/tofile/loadtxt/savetxt (file I/O) and
@@ -116,6 +156,16 @@ ALLOWED_NP_FUNCS = {
     "where", "select", "unique", "sort", "argsort", "percentile",
     "corrcoef", "cov", "nan", "inf", "pi", "e",
     "isnan", "isinf", "isfinite", "concatenate", "reshape",
+    "cumsum", "cumprod", "diff", "clip", "isin", "nanmean", "nansum", "nanmedian",
+    "nanstd", "nanmax", "nanmin", "floor", "ceil", "trunc", "sin", "cos", "tan",
+    "arctan", "arctan2", "log1p", "expm1", "sign", "maximum", "minimum",
+    "argmax", "argmin", "histogram", "digitize", "bincount", "zeros_like",
+    "ones_like", "tile", "repeat", "stack", "vstack", "hstack", "meshgrid",
+    "mod", "average", "ptp", "quantile", "any", "all", "count_nonzero",
+    "searchsorted", "flip", "isclose", "int64", "float64", "int32", "float32",
+    "datetime64", "timedelta64", "bool_", "nanpercentile", "interp", "polyfit",
+    "polyval", "cbrt", "square", "hypot", "radians", "degrees", "tanh",
+    "empty", "full_like", "identity", "eye", "outer", "dot",
 }
 
 # matplotlib.pyplot functions safe to call.
@@ -133,9 +183,18 @@ ALLOWED_PLT_FUNCS = {
 ALLOWED_PX_FUNCS = {
     "bar", "line", "scatter", "pie", "histogram", "imshow",
     "box", "area", "scatter_3d",
+    "violin", "strip", "density_heatmap", "density_contour", "treemap",
+    "sunburst", "funnel", "scatter_matrix", "bar_polar", "line_polar",
+    "scatter_polar", "line_3d", "ecdf", "parallel_coordinates", "timeline",
+    "pie", "icicle", "funnel_area",
 }
 
-ALLOWED_GO_ATTRS = {"Figure", "Scatter", "Bar", "Pie", "Histogram", "Box"}
+ALLOWED_GO_ATTRS = {
+    "Figure", "Scatter", "Bar", "Pie", "Histogram", "Box",
+    "Heatmap", "Violin", "Scatter3d", "Funnel", "Waterfall", "Treemap",
+    "Sunburst", "Indicator", "Table", "Contour", "Surface", "Candlestick",
+    "Scatterpolar", "Barpolar", "Layout", "Histogram2d", "Sankey",
+}
 
 # Instance methods on a returned Figure (plotly or matplotlib) that write to
 # disk or open an external viewer — blocked even though the Figure itself
@@ -187,13 +246,80 @@ def _wrap(obj):
     return obj
 
 
+# AI SECURITY — second sandbox escape found while auditing test coverage:
+# `df.apply(lambda col: col.to_csv("x.csv"))` and `.agg(lambda s: ...)` wrote
+# files. pandas calls the user's lambda with its OWN raw Series/DataFrame, not
+# the proxy, so everything off the allowlist was reachable inside the lambda.
+# Fix: every callable handed to a proxied call is wrapped so the pandas objects
+# pandas passes into it are re-proxied (and anything it returns is unwrapped
+# again). Containers are handled recursively (agg({"col": lambda s: ...})).
+
+def _unwrap_value(v):
+    return v._obj if isinstance(v, (_FrameProxy, _FigureProxy)) else v
+
+
+def _wrap_callable(fn):
+    def _inner(*a, **k):
+        a = tuple(_wrap(x) for x in a)
+        k = {kk: _wrap(vv) for kk, vv in k.items()}
+        return _unwrap_one(fn(*a, **k))
+    return _inner
+
+
+def _unwrap_one(v):
+    if isinstance(v, (_FrameProxy, _FigureProxy)):
+        return v._obj
+    if type(v) in (list, tuple):
+        return type(v)(_unwrap_one(x) for x in v)
+    if type(v) is dict:
+        return {kk: _unwrap_one(x) for kk, x in v.items()}
+    if callable(v) and not isinstance(v, type):
+        return _wrap_callable(v)
+    return v
+
+
 def _unwrap_args(args, kwargs):
-    args = tuple(a._obj if isinstance(a, (_FrameProxy, _FigureProxy)) else a for a in args)
-    kwargs = {
-        k: (v._obj if isinstance(v, (_FrameProxy, _FigureProxy)) else v)
-        for k, v in kwargs.items()
-    }
+    args = tuple(_unwrap_one(a) for a in args)
+    kwargs = {k: _unwrap_one(v) for k, v in kwargs.items()}
     return args, kwargs
+
+
+def _unwrap_index_key(key):
+    """Unwraps proxies inside an indexer key. Callable keys are refused:
+    `df.loc[lambda d: ...]` would hand the lambda the RAW frame."""
+    if isinstance(key, (_FrameProxy, _FigureProxy)):
+        return key._obj
+    if isinstance(key, tuple):
+        return tuple(_unwrap_index_key(k) for k in key)
+    if isinstance(key, slice):
+        return slice(_unwrap_index_key(key.start), _unwrap_index_key(key.stop), _unwrap_index_key(key.step))
+    if isinstance(key, list):
+        return [_unwrap_index_key(k) for k in key]
+    if callable(key):
+        raise TypeError("callable keys are not allowed in .loc/.iloc inside the sandbox")
+    return key
+
+
+class _IndexerProxy:
+    """Wraps df.loc / df.iloc / df.at / df.iat. Only `indexer[key]` and
+    `indexer[key] = value` exist; there is deliberately no attribute
+    passthrough, so `df.loc.obj` (the raw frame) is unreachable."""
+
+    __slots__ = ("_idx",)
+
+    def __init__(self, idx):
+        object.__setattr__(self, "_idx", idx)
+
+    def __getitem__(self, key):
+        return _wrap(object.__getattribute__(self, "_idx")[_unwrap_index_key(key)])
+
+    def __setitem__(self, key, value):
+        if isinstance(value, (_FrameProxy, _FigureProxy)):
+            value = value._obj
+        object.__getattribute__(self, "_idx")[_unwrap_index_key(key)] = value
+
+    def __setattr__(self, name, value):
+        raise AttributeError("assigning attributes is not permitted in the sandbox")
 
 
 class _FrameProxy:
@@ -214,6 +340,13 @@ class _FrameProxy:
         if name in ALLOWED_FRAME_ATTRS:
             val = getattr(obj, name)
             return _wrap(val)
+
+        if name in INDEXER_ATTRS and isinstance(obj, (pd.DataFrame, pd.Series)):
+            return _IndexerProxy(getattr(obj, name))
+
+        # df.size / series.size is a plain int attribute; groupby.size() is a method.
+        if name == "size" and isinstance(obj, (pd.DataFrame, pd.Series)):
+            return obj.size
 
         if name in ALLOWED_FRAME_METHODS:
             attr = getattr(obj, name)
@@ -255,6 +388,46 @@ class _FrameProxy:
 
     def __contains__(self, item):
         return item in object.__getattribute__(self, "_obj")
+
+
+# ── Operators ────────────────────────────────────────────────────────────────
+# AI SECURITY / FUNCTIONALITY — found by the evaluation harness: _FrameProxy
+# defined NO operators at all, so `df['rev'] > 15`, `df['a'] * 2`,
+# `df['a'] + df['b']`, `~mask` and `(m1) & (m2)` all raised TypeError, and
+# `df['region'] == 'S'` silently evaluated to plain False (then crashed as
+# df[False]). Every filter and every derived column failed. Python looks
+# operators up on the TYPE, so __getattr__ never saw them. They are pure
+# element-wise computation on the underlying object; the result is re-wrapped
+# so the proxy is never lost, and proxy operands are unwrapped first.
+
+def _unwrap_operand(v):
+    return object.__getattribute__(v, "_obj") if isinstance(v, _FrameProxy) else v
+
+
+def _make_binary_op(op_name):
+    def _op(self, other):
+        obj = object.__getattribute__(self, "_obj")
+        return _wrap(getattr(obj, op_name)(_unwrap_operand(other)))
+    _op.__name__ = op_name
+    return _op
+
+
+def _make_unary_op(op_name):
+    def _op(self):
+        return _wrap(getattr(object.__getattribute__(self, "_obj"), op_name)())
+    _op.__name__ = op_name
+    return _op
+
+
+for _n in ("lt", "le", "gt", "ge", "eq", "ne",
+           "add", "sub", "mul", "truediv", "floordiv", "mod", "pow",
+           "radd", "rsub", "rmul", "rtruediv", "rfloordiv", "rmod", "rpow",
+           "and", "or", "xor", "rand", "ror", "rxor"):
+    setattr(_FrameProxy, f"__{_n}__", _make_binary_op(f"__{_n}__"))
+for _n in ("neg", "pos", "abs", "invert"):
+    setattr(_FrameProxy, f"__{_n}__", _make_unary_op(f"__{_n}__"))
+# Defining __eq__ removes the default __hash__; proxies are never dict keys.
+_FrameProxy.__hash__ = None
 
 
 class _FigureProxy:

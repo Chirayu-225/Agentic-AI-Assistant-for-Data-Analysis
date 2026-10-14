@@ -35,10 +35,34 @@ def detect_shortcut(query: str, df: pd.DataFrame) -> str | None:
 
     def _find_col(*keywords) -> str | None:
         for kw in keywords:
+            # Strip punctuation ("revenue?" must match a column named
+            # "revenue") and ignore 1-2 letter words ("a" is a substring of
+            # half of all column names).
+            kw = re.sub(r"[^a-z0-9_]", "", kw)
+            if len(kw) < 3:
+                continue
             for col in cols:
                 if kw in col.lower():
                     return col
         return None
+
+    # AI-GENERATED-ANSWER QUALITY — found by the evaluation harness: "list
+    # the regions ranked by total revenue" matched the plain "total" shortcut
+    # and silently returned ONE number (the grand total) instead of a ranked
+    # table, and "which region has the highest total revenue" is the same
+    # trap. A shortcut answers a whole-column aggregate; any question that
+    # groups, ranks, compares, or mentions a second column is not one.
+    _GROUP_INTENT = re.compile(
+        r"\b(by|per|each|every|rank(?:ed|ing)?|top|bottom|which|who|whose|list|"
+        r"compare|comparison|breakdown|group(?:ed)?|across|among|versus|vs)\b")
+
+    def _is_whole_column_aggregate() -> bool:
+        if _GROUP_INTENT.search(q):
+            return False
+        mentioned = [c for c in cols
+                     if re.search(rf"\b{re.escape(str(c).lower())}s?\b", q)
+                     or re.search(rf"\b{re.escape(str(c).lower().replace('_', ' '))}s?\b", q)]
+        return len(mentioned) <= 1
 
     if any(p in q for p in ["how many rows", "count rows", "number of rows", "row count"]):
         return "result = len(df)"
@@ -62,19 +86,19 @@ def detect_shortcut(query: str, df: pd.DataFrame) -> str | None:
         return "result = pd.DataFrame({'rows': [len(df)], 'columns': [len(df.columns)]})"
     if any(p in q for p in ["data types", "dtypes", "column types"]):
         return "result = df.dtypes.rename('dtype').to_frame()"
-    if any(p in q for p in ["mean of", "average of", "avg of"]):
+    if any(p in q for p in ["mean of", "average of", "avg of"]) and _is_whole_column_aggregate():
         col = _find_col(*q.split())
         if col and pd.api.types.is_numeric_dtype(df[col]):
             return f"result = df['{col}'].mean()"
-    if "sum of" in q or ("total" in q and "total rows" not in q):
+    if ("sum of" in q or ("total" in q and "total rows" not in q)) and _is_whole_column_aggregate():
         col = _find_col(*q.split())
         if col and pd.api.types.is_numeric_dtype(df[col]):
             return f"result = df['{col}'].sum()"
-    if any(p in q for p in ["maximum", "max of", "highest"]):
+    if any(p in q for p in ["maximum", "max of", "highest"]) and _is_whole_column_aggregate():
         col = _find_col(*q.split())
         if col and pd.api.types.is_numeric_dtype(df[col]):
             return f"result = df['{col}'].max()"
-    if any(p in q for p in ["minimum", "min of", "lowest"]):
+    if any(p in q for p in ["minimum", "min of", "lowest"]) and _is_whole_column_aggregate():
         col = _find_col(*q.split())
         if col and pd.api.types.is_numeric_dtype(df[col]):
             return f"result = df['{col}'].min()"

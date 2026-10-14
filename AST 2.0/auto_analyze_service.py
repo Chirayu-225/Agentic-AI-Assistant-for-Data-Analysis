@@ -163,33 +163,64 @@ def _parse_chart_plan(raw: str) -> list[dict]:
     return charts[:3]
 
 
+def _build_chart_repair_prompt(schema_text: str, spec: str, bad_code: str, error: str) -> str:
+    """Second-chance prompt: the first attempt failed in the sandbox, so show
+    the model its own code and the exact error and ask for a rewrite."""
+    from query_engine import build_chart_code_prompt
+    base = build_chart_code_prompt(schema_text, spec)
+    return (
+        base
+        + "\n\nYOUR PREVIOUS ATTEMPT FAILED.\n"
+        + "Previous code:\n```python\n" + bad_code + "\n```\n"
+        + "Error: " + str(error) + "\n\n"
+        + "Rewrite the code so it works. If the error says a method or attribute is "
+        + "'blocked in the sandbox', do NOT use it — achieve the same result with "
+        + "different, basic pandas operations (groupby/agg/value_counts/reset_index/"
+        + "sort_values) and plotly.express. Output ONLY the corrected Python code."
+    )
+
+
 def _run_one_chart(plan: dict, schema_text: str, df: pd.DataFrame, session_id: str) -> dict:
     """Turns one chart plan entry into a rendered chart or a clean,
     isolated error — never raises, so one bad chart can't take the
-    other two down with it."""
+    other two down with it.
+
+    A failed attempt (sandbox block, runtime error, or a result that isn't a
+    Plotly figure) gets ONE repair retry: the model is shown its own code and
+    the error and asked to rewrite it. Generated code differs run to run, so
+    a single blocked method shouldn't cost the user a whole chart."""
     from query_engine import build_chart_code_prompt, llm_with_fallback, extract_and_clean_code
     from sandbox_limits import run_sandboxed
 
     base = {"title": plan["title"], "why": plan.get("supports", "")}
+    MAX_ATTEMPTS = 2
+    last_error = "unknown error"
+    code = ""
     try:
-        prompt = build_chart_code_prompt(schema_text, plan["spec"])
-        raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
-        code = extract_and_clean_code(raw)
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            if attempt == 1:
+                prompt = build_chart_code_prompt(schema_text, plan["spec"])
+            else:
+                prompt = _build_chart_repair_prompt(schema_text, plan["spec"], code, last_error)
+                print(f"[auto-analyze] chart '{plan['title']}' attempt 1 failed ({last_error}); retrying once", flush=True)
 
-        sbr = run_sandboxed(code, df, timeout_seconds=20)
-        if not sbr.success:
-            return {**base, "resultType": "error", "resultData": None, "error": sbr.error}
+            raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
+            code = extract_and_clean_code(raw)
 
-        if not _is_plotly_fig(sbr.value):
+            sbr = run_sandboxed(code, df, timeout_seconds=20)
+            if not sbr.success:
+                last_error = sbr.error
+                continue
+            if not _is_plotly_fig(sbr.value):
+                last_error = "Generated chart wasn't a valid Plotly figure"
+                continue
+
             return {
-                **base, "resultType": "error", "resultData": None,
-                "error": "Generated chart wasn't a valid Plotly figure — try Auto-Analyze again.",
+                **base, "resultType": "chart",
+                "resultData": json.loads(sbr.value.to_json()), "error": None,
             }
 
-        return {
-            **base, "resultType": "chart",
-            "resultData": json.loads(sbr.value.to_json()), "error": None,
-        }
+        return {**base, "resultType": "error", "resultData": None, "error": last_error}
     except Exception as e:
         return {**base, "resultType": "error", "resultData": None, "error": f"Chart generation failed: {e}"}
 

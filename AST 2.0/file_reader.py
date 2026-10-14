@@ -151,6 +151,35 @@ def _pick_best_excel_sheet(file_bytes: bytes, xls: pd.ExcelFile) -> tuple[str, p
     return best_name, pd.read_excel(xls, sheet_name=best_name)
 
 
+def _fast_excel_engine():
+    """'calamine' when python-calamine is installed and pandas can use it."""
+    try:
+        import python_calamine  # noqa: F401
+        major, minor = (int(x) for x in pd.__version__.split(".")[:2])
+        if (major, minor) >= (2, 2):
+            return "calamine"
+    except Exception:
+        pass
+    return None
+
+
+def _read_excel_with_engine(file_bytes: bytes, filename: str, engine):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        xls = pd.ExcelFile(io.BytesIO(file_bytes), engine=engine) if engine else pd.ExcelFile(io.BytesIO(file_bytes))
+        if len(xls.sheet_names) == 1:
+            return pd.read_excel(xls, sheet_name=0)
+
+        sheet_name, df = _pick_best_excel_sheet(file_bytes, xls)
+        print(
+            f"[file_reader] '{filename}' has {len(xls.sheet_names)} sheets "
+            f"{xls.sheet_names} — auto-selected '{sheet_name}' ({len(df)} rows) "
+            f"as the largest data sheet ({engine or 'openpyxl'}).",
+            flush=True,
+        )
+        return df
+
+
 def read_tabular_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Parse an uploaded CSV/TXT/Excel file into a DataFrame, reusing a
     recent parse of the exact same bytes when there is one (cache_layer.
@@ -179,20 +208,22 @@ def _read_tabular_file_uncached(file_bytes: bytes, filename: str) -> pd.DataFram
         # the data being read — real noise, not a signal, so it's
         # suppressed the same way the equally-harmless datetime-parse
         # warning is in cleaning.py.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            xls = pd.ExcelFile(io.BytesIO(file_bytes))
-            if len(xls.sheet_names) == 1:
-                return pd.read_excel(xls, sheet_name=0)
-
-            sheet_name, df = _pick_best_excel_sheet(file_bytes, xls)
-            print(
-                f"[file_reader] '{filename}' has {len(xls.sheet_names)} sheets "
-                f"{xls.sheet_names} — auto-selected '{sheet_name}' ({len(df)} rows) "
-                f"as the largest data sheet.",
-                flush=True,
-            )
-            return df
+        # PERFORMANCE: openpyxl parses cell-by-cell in pure Python (~15-60s for
+        # an 80k-row sheet). python-calamine (a Rust reader, pandas >= 2.2) does
+        # the same job 5-20x faster. Used when installed; any failure falls back
+        # to openpyxl, so behaviour is identical and nothing new is required.
+        engines = [e for e in (_fast_excel_engine(), None) if e is not None] + [None]
+        last_exc = None
+        for engine in engines:
+            try:
+                return _read_excel_with_engine(file_bytes, filename, engine)
+            except Exception as e:  # noqa: BLE001 — retried with the next engine
+                last_exc = e
+                if engine is not None:
+                    print(f"[file_reader] {engine} failed ({e}); falling back to openpyxl", flush=True)
+                    continue
+                raise
+        raise last_exc  # pragma: no cover
 
     if ext in ("csv", "txt"):
         try:
