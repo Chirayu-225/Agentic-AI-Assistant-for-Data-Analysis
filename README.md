@@ -100,7 +100,7 @@ flowchart TD
 **AI / LLM:** Groq-hosted Llama models, with dual-model routing (a fast model for code generation, a larger model for reasoning)
 **Data engines:** DuckDB (SQL joins), ChromaDB (vector store for RAG)
 **Document processing:** pdfplumber (table extraction), pypdf, python-docx
-**Storage:** Vercel Blob (file storage)
+**Storage:** Uploaded files are stored on the backend's local disk (no cloud storage account needed)
 
 ## Project Structure
 
@@ -138,7 +138,6 @@ flowchart TD
 - Python 3.11+
 - Node.js 18+
 - A [Groq API key](https://console.groq.com)
-- A Vercel Blob storage token (for file uploads)
 
 ### Backend
 
@@ -171,7 +170,6 @@ Create a `.env.local` file:
 ```
 PYTHON_SERVICE_URL=http://localhost:8000
 PYTHON_SERVICE_SECRET=same_secret_as_backend
-BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
 ```
 
 Run the app:
@@ -190,6 +188,7 @@ npm run dev
 | `RATE_LIMIT_MULTIPLIER` | 1 | Scales every limit (e.g. `2` per extra worker) |
 | `CACHE_ENABLED` | on | `0` bypasses all caches |
 | `CACHE_TTL_SECONDS` | 900 | Entry lifetime |
+| `MAX_UPLOAD_MB` / `LOCAL_UPLOAD_TTL_HOURS` | 200 / 24 | Largest accepted upload; hours before an uploaded file is deleted |
 | `CACHE_BLOB_MB` / `CACHE_FRAME_MB` / `CACHE_RESULT_MB` | 64 / 96 / 16 | Memory budgets |
 | `PII_WITHHOLD_PERSONAL_COLUMNS` | on | `0` sends personal-named columns to the LLM (not recommended) |
 | `PII_USE_NER` | off | `1` enables the optional spaCy name detector (needs `spacy` + a model; untested adapter) |

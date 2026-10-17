@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@vercel/blob": "^2.0.0",
     "jspdf": "^4.2.1",
     "next": "^15.1.0",
     "plotly.js-dist-min": "^2.35.0",

@@ -7,8 +7,9 @@ service.
 ## What's built vs. what's next
 
 **Built:**
-- CSV upload flow, direct browser-to-storage (Vercel Blob), so the 4.5MB
-  Vercel serverless function body limit never applies to the actual file.
+- File upload streamed through the app to the Python backend, which keeps the
+  file on local disk (no cloud storage, no tokens). Large files are streamed,
+  never buffered.
 - CSV query panel + result display (table / scalar / chart) — verified
   working end-to-end against a real Python service.
 - Document Intelligence tab — upload PDF/DOCX/TXT/MD, ask questions (RAG
@@ -34,21 +35,25 @@ service.
 ```bash
 npm install
 cp .env.example .env.local
-# fill in BLOB_READ_WRITE_TOKEN, PYTHON_SERVICE_URL, PYTHON_SERVICE_SECRET
+# fill in PYTHON_SERVICE_URL and PYTHON_SERVICE_SECRET (must match the backend's .env)
 npm run dev
 ```
 
-`BLOB_READ_WRITE_TOKEN` comes from your Vercel project's Storage tab, after
-creating a Blob store (free tier is enough for this).
+That is the whole frontend setup — there is no storage account or token.
 
-## Why uploads work the way they do
+## How uploads work
 
-Vercel serverless functions (what a Next.js API route becomes when deployed)
-have a hard 4.5MB request body limit — not a Next.js limit, a Vercel
-platform limit. `app/api/upload/route.ts` never receives the file; it only
-issues a signed token, and the browser uploads the actual bytes straight to
-Blob storage. `app/api/analyze/route.ts` then receives a small JSON payload
-(a file URL, not the file) and forwards it to your Python service.
+The browser POSTs the raw file to `/api/upload`. That route streams the bytes
+on to the Python service's `POST /upload` (never holding the whole file in
+memory), and the service stores it in a temp folder on disk and returns an id
+like `local://3f9a...`. Every other route (`/api/analyze`, `/api/profile`, ...)
+keeps receiving that id as `fileUrl`, and the Python service resolves it back
+to the stored file. The backend enforces the size cap (`MAX_UPLOAD_MB`, default
+200) and deletes files after `LOCAL_UPLOAD_TTL_HOURS` (default 24).
+
+This replaced Vercel Blob. Blob existed only to get around Vercel's 4.5MB
+serverless body limit, which does not apply when running locally. If the app is
+ever deployed to Vercel, large uploads would need a storage service again.
 
 ## Python API contract
 
@@ -63,7 +68,7 @@ Headers:
   X-Service-Secret: <matches PYTHON_SERVICE_SECRET>
 Body:
   {
-    "fileUrl": "https://....public.blob.vercel-storage.com/....csv",
+    "fileUrl": "local://<id returned by POST /upload>",
     "filename": "sales.csv",
     "query": "what are the top 5 rows by sales?",
     "sessionId": "a-uuid-from-the-browser"
@@ -137,28 +142,26 @@ styled rank/body pairs — matching `rag_engine.py`'s
 
 ### Common to all four
 
-Building any of these means: fetch the file from `fileUrl` (plain HTTP
-GET — see the "Blob access" note below). The `X-Service-Secret` header
+Building any of these means: load the file named by `fileUrl` (a `local://` id
+from `POST /upload`, or any plain HTTP URL). The `X-Service-Secret` header
 should be checked first, as a FastAPI dependency, and any request missing
 or mismatching it should get a 401 before any of that work happens —
 this is the only thing standing between your sandboxed exec / RAG
 endpoints and the open internet, given Render's free tier has no private
 networking between services.
 
-## Known trade-off: Blob access is `public`
+## Security note on stored files
 
-`FileUpload.tsx` uploads with `access: "public"` — the file gets a
-long, unguessable URL, but isn't behind real authentication. This is a
-security-through-obscurity trade-off (same threat model as an "anyone with
-the link" sharing URL), not a solved problem. `access: "private"` is more
-correct but requires generating a signed, short-lived download URL server-side
-for the Python service to fetch — extra complexity that's reasonable to add
-once real auth exists, not before. Worth revisiting when this moves past a
-personal project.
+Uploaded files get a content-hash id and are only reachable through the backend,
+which requires the shared `X-Service-Secret` header; ids are validated against a
+strict pattern so they cannot be used to read other paths. There is no per-user
+access control yet (same as the rest of the app) — add it together with real
+authentication.
 
 ## Deployment
 
-- Frontend: Vercel (free Hobby tier — this is the whole point of the Blob
-  upload pattern above).
+- The project is built to run locally. Deploying the frontend to Vercel would
+  need an external storage service for large uploads (Vercel's 4.5MB request
+  limit).
 - Python service: Render free tier, as planned earlier — unaffected by any
   of this, still deployed completely separately.

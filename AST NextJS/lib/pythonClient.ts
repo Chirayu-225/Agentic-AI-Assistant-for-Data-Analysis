@@ -54,7 +54,7 @@ const FETCH_TIMEOUT_MS = 35_000;
 const INDEX_TIMEOUT_MS = 90_000;
 
 export interface AnalyzeRequest {
-  fileUrl: string; // Vercel Blob URL — the Python service fetches the CSV from here
+  fileUrl: string; // "local://<id>" from /api/upload (or any http(s) URL) — the Python service loads the file from here
   filename: string;
   query: string;
   sessionId: string; // per-user namespace — see the isolation work in sandbox_proxy/rag_engine
@@ -233,6 +233,65 @@ async function callPythonService<TResponse>(
   }
 
   return res.json() as Promise<TResponse>;
+}
+
+// ── File upload (replaces the Vercel Blob direct-upload step) ────────────────
+// The browser sends the file to /api/upload, which streams it here to the
+// Python service's POST /upload. The service stores it on local disk and
+// returns {url: "local://<id>"}; every other call keeps taking that string as
+// `fileUrl`, so nothing downstream had to change. Large files are streamed, not
+// buffered, so memory stays flat regardless of size.
+const UPLOAD_TIMEOUT_MS = 10 * 60_000;
+
+export class UploadRejectedError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "UploadRejectedError";
+    this.status = status;
+  }
+}
+
+export interface UploadResult {
+  url: string;
+  bytes: number;
+}
+
+export async function uploadToPython(
+  body: ReadableStream<Uint8Array> | Uint8Array,
+  filename: string
+): Promise<UploadResult> {
+  const init: RequestInit & { duplex?: "half" } = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-Service-Secret": PYTHON_SERVICE_SECRET ?? "",
+      "X-Filename": encodeURIComponent(filename),
+    },
+    body: body as BodyInit,
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+  };
+  // Node's fetch requires this flag when the body is a stream.
+  if (!(body instanceof Uint8Array)) init.duplex = "half";
+
+  const res = await fetch(`${PYTHON_SERVICE_URL}/upload`, init);
+
+  if (res.status === 429) {
+    throw new RateLimitedError(Number(res.headers.get("Retry-After")) || 30);
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let message = text || res.statusText;
+    try {
+      const j = JSON.parse(text);
+      message = j.error || j.detail || message;
+    } catch {
+      /* not JSON — keep the raw text */
+    }
+    throw new UploadRejectedError(message, res.status);
+  }
+  const j = (await res.json()) as { url: string; bytes: number };
+  return { url: j.url, bytes: j.bytes };
 }
 
 export function analyzeCsv(req: AnalyzeRequest): Promise<AnalyzeResponse> {

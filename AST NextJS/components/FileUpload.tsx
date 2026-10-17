@@ -1,8 +1,41 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { upload } from "@vercel/blob/client";
-import { getOrCreateSessionId } from "@/lib/sessionId";
+
+/**
+ * Sends the file to /api/upload as a raw body (XMLHttpRequest, because fetch
+ * cannot report upload progress). Resolves with the backend's {url, bytes}.
+ */
+function uploadFile(
+  file: File,
+  onProgress: (percent: number) => void
+): Promise<{ url: string; bytes: number }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable) onProgress(Math.round((evt.loaded / evt.total) * 100));
+    };
+    xhr.onload = () => {
+      let body: { url?: string; bytes?: number; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* non-JSON response — handled below */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.url) {
+        resolve({ url: body.url, bytes: body.bytes ?? file.size });
+      } else {
+        reject(new Error(body.error || `Upload failed (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload — is the app server running?"));
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.send(file);
+  });
+}
 
 export interface UploadedFile {
   url: string;
@@ -40,16 +73,10 @@ export default function FileUpload({
     setProgress(0);
 
     try {
-      const sessionId = getOrCreateSessionId();
-      const blob = await upload(file.name, file, {
-        access: "public", // known trade-off — see README's "Blob access" note
-        handleUploadUrl: "/api/upload",
-        clientPayload: sessionId, // carried through to the server's onUploadCompleted
-        onUploadProgress: (evt: { percentage: number }) => setProgress(evt.percentage),
-      });
+      const { url } = await uploadFile(file, (pct) => setProgress(pct));
 
       setUploadedName(file.name);
-      onUploaded({ url: blob.url, filename: file.name });
+      onUploaded({ url, filename: file.name });
     } catch (err) {
       setError((err as Error).message);
     } finally {

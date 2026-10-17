@@ -49,6 +49,7 @@ import session_cache
 import audit_log
 import cache_layer
 import rate_limiter
+import local_store
 
 SERVICE_SECRET = os.environ.get("PYTHON_SERVICE_SECRET", "")
 
@@ -224,6 +225,15 @@ def _limit(group: str, key: str, session_id: str | None = None, filename: str | 
 def _fetch_blob(file_url: str) -> tuple[bytes | None, dict | None]:
     """Shared by /analyze and /rag/index — fetch the uploaded file from
     Blob storage. Returns (bytes, None) on success or (None, error_dict)."""
+    # Files uploaded through POST /upload live on local disk (local_store.py);
+    # anything else is treated as a remote URL (e.g. a Vercel Blob URL).
+    if local_store.is_local_url(file_url):
+        data = local_store.load(file_url)
+        if data is None:
+            return None, {"success": False,
+                          "error": "The uploaded file is no longer available — please upload it again."}
+        return data, None
+
     cached = cache_layer.blob_cache.get(file_url)
     if cached is not None:
         return cached, None
@@ -236,6 +246,37 @@ def _fetch_blob(file_url: str) -> tuple[bytes | None, dict | None]:
         return resp.content, None
     except Exception as e:
         return None, {"success": False, "error": f"Could not fetch file from storage: {e}"}
+
+
+@app.post("/upload")
+async def upload(request: Request, x_service_secret: str = Header(default=""),
+                 x_filename: str = Header(default="")):
+    """Receives a file as the raw request body (no multipart, so no extra
+    dependency), streams it to local disk and returns {"url": "local://<id>"}.
+    Replaces the Vercel Blob direct-upload step for local use."""
+    _check_secret(x_service_secret)
+    _limit("light", "upload:" + _client_ip(request), filename=x_filename)
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > local_store.max_upload_bytes():
+        return JSONResponse({"success": False, "error": "File is larger than the upload limit."}, status_code=413)
+
+    writer = local_store.UploadWriter()
+    try:
+        async for chunk in request.stream():
+            if chunk:
+                writer.write(chunk)
+        url = writer.finish()
+    except local_store.UploadTooLarge as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=413)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        writer.abort()
+        return JSONResponse({"success": False, "error": f"Upload failed: {e}"}, status_code=500)
+
+    audit_log.record("upload", bytes=writer.size, upload_id=url[-8:])
+    return {"success": True, "url": url, "bytes": writer.size}
 
 
 @app.get("/health")
