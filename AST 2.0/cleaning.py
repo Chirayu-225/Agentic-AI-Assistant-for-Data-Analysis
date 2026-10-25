@@ -12,6 +12,161 @@ import pandas as pd
 import numpy as np
 
 
+_SENTINELS = {"nan", "none", "null", "n/a", "na", "--", "-", "", "nat"}
+
+# Currency symbols and codes, as prefix or suffix ("₹1,200", "Rs. 900",
+# "INR 450", "1200 USD").
+_CURRENCY = re.compile(
+    r"(?i)(?:[\$£€₹¥₩₺₽]|\brs\.?|\binr\b|\busd\b|\beur\b|\bgbp\b|\baud\b|\bcad\b|\bsgd\b|\baed\b)"
+)
+_NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+_DATE_LIKE = (
+    r"^\s*(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"          # 2026-03-05, 2026/03/05
+    r"|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}"               # 05/03/2026
+    r"|\d{1,2}\s+[A-Za-z]{3,9}\.?,?\s+\d{2,4}"        # 05 Mar 2026
+    r"|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{2,4})"       # Mar 5, 2026
+    r"(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\s*$"          # optional time
+)
+
+_TOTAL_LABEL = r"^(grand\s+)?(total|subtotal|sum)s?\s*:?$"
+
+
+def _parse_money(series: pd.Series) -> tuple[pd.Series, bool]:
+    """'₹1,20,000.50' -> 120000.5, 'Rs. 900' -> 900, '(1,200)' -> -1200.
+    Returns (parsed values, NaN where unparseable; whether any value
+    carried a currency marker)."""
+    s = series.astype(str).str.strip()
+    had_currency = bool(s.str.contains(_CURRENCY, na=False).any())
+    negative = s.str.match(r"^\(.*\)$", na=False) | s.str.match(r"^-", na=False)
+    core = (
+        s.str.replace(_CURRENCY, "", regex=True)
+        .str.replace(r"[()\s,]", "", regex=True)
+        .str.lstrip("-")
+    )
+    ok = core.str.match(_NUMBER, na=False)
+    values = pd.to_numeric(core.where(ok), errors="coerce")
+    values = values.where(~negative, -values)
+    return values, had_currency
+
+
+def _parse_dates(series: pd.Series) -> pd.Series:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        try:
+            return pd.to_datetime(series, errors="coerce", format="mixed")
+        except (TypeError, ValueError):  # pandas < 2.0 has no format="mixed"
+            return pd.to_datetime(series, errors="coerce")
+
+
+def _category_key(value: str) -> str:
+    """'Mid Market', 'mid-market', ' MID-MARKET ' -> 'midmarket'."""
+    return re.sub(r"[^0-9a-z]", "", str(value).lower())
+
+
+def _merge_category_variants(col: pd.Series):
+    """Merges values of a low-cardinality text column that differ only in
+    case, spacing or punctuation ("North" / "north " / "NORTH"), plus dotted
+    abbreviations that unambiguously match one other value ("N." -> "North"
+    only if no other value starts with "n"). Each group takes its most
+    common spelling. Returns (new column, short description) or None."""
+    present = col.dropna().astype(str)
+    present = present[~present.str.lower().isin(_SENTINELS)]
+    n_unique = present.nunique()
+    if n_unique < 2:
+        return None
+    # A category has few distinct values once case/spacing/punctuation are
+    # ignored. Judged on those normalised keys (not raw spellings), so a
+    # small table full of variants still qualifies, while free text and
+    # IDs (nearly every value distinct) never do.
+    n_keys = present.map(_category_key).nunique()
+    if n_keys > 60 or n_keys > max(10, 0.5 * len(present)):
+        return None
+
+    counts = present.value_counts()
+    groups: dict[str, list[str]] = {}
+    for value in counts.index:  # most common first
+        key = _category_key(value)
+        if key:
+            groups.setdefault(key, []).append(value)
+
+    # Dotted abbreviations: "N." joins the single full key starting with "n".
+    for key in list(groups):
+        if key not in groups:
+            continue
+        spellings = groups[key]
+        if len(key) <= 3 and all(re.fullmatch(r"\s*[A-Za-z]{1,3}\.\s*", v) for v in spellings):
+            targets = [k for k in groups if k != key and k.startswith(key) and len(k) > len(key)]
+            if len(targets) == 1:
+                groups[targets[0]].extend(groups.pop(key))
+
+    mapping, merged_examples = {}, []
+    for key, spellings in groups.items():
+        canonical = max(spellings, key=lambda v: counts.get(v, 0))
+        variants = [v for v in spellings if v != canonical]
+        for v in spellings:
+            mapping[v] = canonical
+        if variants:
+            merged_examples.append(f"{' / '.join(repr(v) for v in variants[:3])} → {canonical!r}")
+    if not merged_examples:
+        return None
+    new_col = col.map(lambda v: mapping.get(str(v), v) if pd.notna(v) else v)
+    return new_col, "; ".join(merged_examples[:4]) + (" …" if len(merged_examples) > 4 else "")
+
+
+def _rows_agree(group: pd.DataFrame) -> bool:
+    """True when every column has at most one distinct non-blank value."""
+    for c in group.columns:
+        vals = group[c].dropna()
+        vals = vals[~vals.astype(str).str.lower().isin(_SENTINELS)]
+        if vals.astype(str).nunique() > 1:
+            return False
+    return True
+
+
+
+_CURRENCY_NAMES = [
+    (re.compile(r"₹|\brs\.?|\binr\b", re.I), "₹ (INR)"),
+    (re.compile(r"\$|\busd\b", re.I), "$ (USD)"),
+    (re.compile(r"€|\beur\b", re.I), "€ (EUR)"),
+    (re.compile(r"£|\bgbp\b", re.I), "£ (GBP)"),
+    (re.compile(r"¥", re.I), "¥"),
+]
+
+
+def detect_currencies(raw_df: pd.DataFrame) -> dict:
+    """{normalised column name: currency label} for columns whose raw text
+    carries currency markers — e.g. {'amount': '₹ (INR)'}. Read from the
+    RAW frame, because cleaning strips the symbols. Used so insight text
+    states the data's real currency instead of assuming dollars."""
+    found = {}
+    # A column NAME can state the currency even when cells are bare numbers
+    # ("amount_inr", "price_usd", "cost_in_rupees").
+    name_tokens = {"inr": "₹ (INR)", "rupee": "₹ (INR)", "rupees": "₹ (INR)", "rs": "₹ (INR)",
+                   "usd": "$ (USD)", "dollar": "$ (USD)", "dollars": "$ (USD)",
+                   "eur": "€ (EUR)", "euro": "€ (EUR)", "euros": "€ (EUR)", "gbp": "£ (GBP)"}
+    for col in raw_df.columns:
+        toks = re.split(r"[^a-z0-9]+", str(col).lower())
+        for t in toks:
+            if t in name_tokens:
+                found[str(col).strip().lower().replace(" ", "_")] = name_tokens[t]
+                break
+    for col in raw_df.columns:
+        if str(col).strip().lower().replace(" ", "_") in found:
+            continue
+        series = raw_df[col]
+        if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+            continue
+        text = series.dropna().astype(str).head(2000)
+        if text.empty:
+            continue
+        for pattern, label in _CURRENCY_NAMES:
+            if text.str.contains(pattern, na=False).mean() >= 0.2:
+                found[str(col).strip().lower().replace(" ", "_")] = label
+                break
+    return found
+
+
 def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
     Apply deterministic cleaning steps in sequence.
@@ -89,8 +244,6 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         log.append(f"✓ Removed {before_rows - df_c.shape[0]} duplicate row(s)")
 
     # ── 5. Per-column type cleaning ───────────────────────────────────────────
-    currency_re = r"[\$£€₹¥₩₺₽]"
-
     def _is_string_col(series):
         return (
             pd.api.types.is_object_dtype(series)
@@ -103,78 +256,49 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         if col in id_like_cols:
             # Already handled in step 2b — skip the numeric-family
             # detectors below entirely, or e.g. an all-digit zip code
-            # would get re-flagged as "thousands separators" here and
-            # silently converted right back to a number.
+            # would get re-flagged as a number and averaged.
             continue
 
         series = df_c[col].astype(str).str.strip()
-
-        # 5a. Parenthetical negatives: (1000) → -1000
-        paren_mask = series.str.match(r"^\([\d,\.]+\)$", na=False)
-        if paren_mask.any():
-            series = series.str.replace(r"\((.*?)\)", r"-\1", regex=True)
-            log.append(f"✓ Converted parenthetical negatives in '{col}'")
-
-        # 5b. Currency
-        currency_mask = series.str.contains(currency_re, regex=True, na=False)
-        if currency_mask.sum() > len(series) * 0.4:
-            cleaned = (
-                series.str.replace(currency_re, "", regex=True)
-                .str.replace(",", "", regex=False)
-                .str.strip()
-            )
-            parsed = pd.to_numeric(cleaned, errors="coerce")
-            if parsed.notna().sum() > currency_mask.sum() * 0.5:
-                df_c[col] = parsed
-                log.append(f"✓ Parsed currency values in '{col}'")
+        present = ~series.str.lower().isin(_SENTINELS)
+        n_present = int(present.sum())
+        if n_present == 0:
             continue
 
-        # 5c. Percentages
+        # 5a. Percentages — kept in the unit the file used (5% -> 5), so an
+        #     answer about "average discount percentage" reads 3.5, not
+        #     0.035. The column name and log make the unit explicit.
         pct_mask = series.str.endswith("%", na=False)
-        if pct_mask.sum() > len(series) * 0.4:
-            cleaned = series.str.replace("%", "", regex=False).str.strip()
-            parsed  = pd.to_numeric(cleaned, errors="coerce")
-            if parsed.notna().sum() > pct_mask.sum() * 0.5:
-                df_c[col] = parsed / 100.0
-                log.append(f"✓ Converted percentage values in '{col}' (÷100)")
-            continue
-
-        # 5d. Thousands separators
-        comma_mask = series.str.match(r"^-?[\d,]+\.?\d*$", na=False)
-        if comma_mask.sum() > len(series) * 0.4:
-            cleaned = series.str.replace(",", "", regex=False)
-            parsed  = pd.to_numeric(cleaned, errors="coerce")
-            if parsed.notna().sum() > comma_mask.sum() * 0.5:
+        if pct_mask.sum() > n_present * 0.4:
+            parsed = pd.to_numeric(series.str.replace("%", "", regex=False).str.strip(), errors="coerce")
+            if parsed.notna().sum() >= pct_mask.sum() * 0.8:
                 df_c[col] = parsed
-                log.append(f"✓ Removed thousands separators in '{col}'")
-            continue
-
-        # 5e. Datetime
-        # Free-text columns (a book title, a URL, a publisher blurb with
-        # a date buried inside it) will never pass the 0.6 threshold
-        # below, but pandas still pays the cost of trying — dateutil's
-        # per-element fallback is slow on long strings and prints a
-        # UserWarning for every single column it's tried on, which was
-        # drowning real server logs in noise on datasets with a lot of
-        # text columns. A cheap pre-check (average length under 30 chars
-        # — comfortably longer than any real date/datetime string) skips
-        # columns that were never going to parse as dates anyway.
-        avg_len = series.str.len().mean()
-        if pd.notna(avg_len) and avg_len <= 30:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                parsed_date = pd.to_datetime(series, errors="coerce")
-            if parsed_date.notna().sum() > len(series) * 0.6:
-                df_c[col] = parsed_date
-                log.append(f"✓ Parsed datetime in '{col}'")
+                log.append(f"✓ Converted percentages in '{col}' to numbers in percent points (5% → 5)")
                 continue
 
-        # 5f. Plain numeric strings
-        parsed = pd.to_numeric(series, errors="coerce")
-        non_null = series.replace("nan", pd.NA).dropna()
-        if len(non_null) > 0 and parsed.notna().sum() / len(non_null) > 0.7:
-            df_c[col] = parsed
-            log.append(f"✓ Converted '{col}' to numeric")
+        # 5b. Money and formatted numbers in one pass: currency symbols and
+        #     codes (₹, Rs., INR, $, USD...), thousands/lakh separators,
+        #     and accounting negatives "(1,200.00)". A column converts when
+        #     at least 80% of its non-blank values parse, so a column that
+        #     MIXES "₹1,200", "Rs. 900" and "450" (common in Indian exports)
+        #     is still recognised as money.
+        parsed, had_currency = _parse_money(series)
+        if parsed[present].notna().sum() >= n_present * 0.8:
+            df_c[col] = parsed.where(present)
+            log.append(f"✓ Parsed {'currency' if had_currency else 'numeric'} values in '{col}'")
+            continue
+
+        # 5c. Dates — mixed formats in one column ("2026-03-05",
+        #     "05 Mar 2026", "2026/03/05") are normal in merged exports.
+        #     Only attempted when most values LOOK like dates, so free text
+        #     and codes are never coerced.
+        looks_like_date = series[present].str.contains(_DATE_LIKE, regex=True, na=False)
+        if looks_like_date.sum() >= n_present * 0.6:
+            parsed_date = _parse_dates(series)
+            if parsed_date[present].notna().sum() >= n_present * 0.8:
+                df_c[col] = parsed_date.where(present)
+                log.append(f"✓ Parsed dates in '{col}'")
+                continue
 
     # ── 6. Strip whitespace from remaining strings (preserve real NaN) ─────────
     for col in df_c.columns:
@@ -199,54 +323,68 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
                 df_c.loc[mask, col] = np.nan
                 log.append(f"✓ Replaced {mask.sum()} sentinel numeric null(s) in '{col}'")
 
-    # ── 8. Fill remaining nulls — numeric: median, categorical: 'Unknown' ─────
-    # First, identify totals/summary rows via the first column (the
-    # label/category column in essentially every real-world table this
-    # app sees — "Region", "Department", "Office", etc.). This matters
-    # because a table extracted from a PDF report routinely has a
-    # "Total" row where some cells are DELIBERATELY blank (a grand-total
-    # row often only has the sum column filled in, not a per-column
-    # breakdown) — that blank isn't missing data to guess at, it's
-    # structural. Median-filling those cells with an average of the
-    # OTHER rows silently fabricates a plausible-looking but completely
-    # fictional number for a line that's supposed to be a sum, which is
-    # a worse failure than just leaving it blank: nothing signals it's
-    # fake. (Found via a real extracted PDF table during testing — this
-    # wasn't a hypothetical edge case.)
-    is_total_row = pd.Series(False, index=df_c.index)
-    if len(df_c.columns) > 0:
-        label_col = df_c[df_c.columns[0]].astype(str).str.strip().str.lower()
-        is_total_row = label_col.str.match(r"^(grand\s+)?(total|sum|subtotal)s?$", na=False)
+    # ── 8. Total / summary rows ───────────────────────────────────────────────
+    # A "TOTAL" or "Grand Total" line at the bottom of an export is not a
+    # record: left in, it doubles every sum and adds one to every count.
+    # Detected by an exact label match in the first two columns.
+    total_mask = pd.Series(False, index=df_c.index)
+    for label_col in list(df_c.columns[:2]):
+        labels = df_c[label_col].astype(str).str.strip().str.lower()
+        total_mask |= labels.str.match(_TOTAL_LABEL, na=False)
+    if total_mask.any():
+        df_c = df_c[~total_mask]
+        log.append(f"✓ Excluded {int(total_mask.sum())} total/summary row(s) so they aren't counted as data")
 
+    # ── 9. Merge spelling variants of the same category ───────────────────────
     for col in df_c.columns:
-        null_count = df_c[col].isnull().sum()
-        if null_count == 0:
+        if col in id_like_cols or not _is_string_col(df_c[col]):
             continue
+        merged = _merge_category_variants(df_c[col])
+        if merged is not None:
+            df_c[col], examples = merged
+            log.append(f"✓ Merged spelling variants in '{col}': {examples}")
 
-        if pd.api.types.is_numeric_dtype(df_c[col]):
-            fillable_mask = df_c[col].isnull() & ~is_total_row
-            total_row_nulls = int((df_c[col].isnull() & is_total_row).sum())
+    # ── 10. Duplicates, again, now that values are normalised ─────────────────
+    before_rows = df_c.shape[0]
+    df_c = df_c.drop_duplicates()
+    if df_c.shape[0] < before_rows:
+        log.append(f"✓ Removed {before_rows - df_c.shape[0]} duplicate row(s) that only differed in formatting")
 
-            if fillable_mask.any():
-                median_val = df_c.loc[~is_total_row, col].median()
-                df_c.loc[fillable_mask, col] = median_val
-                log.append(f"✓ Filled {int(fillable_mask.sum())} null(s) in '{col}' with median ({median_val:.2f})")
+    # Rows that repeat a unique record ID and agree on every value both of
+    # them have (one copy may have a blank cell) are the same record
+    # submitted twice — keep the most complete copy.
+    for col in id_like_cols:
+        if col not in df_c.columns:
+            continue
+        ids = df_c[col]
+        # Must look like a per-record ID (mostly distinct). A shared key
+        # such as employee_id repeats by design and is skipped; even if it
+        # weren't, rows are only merged when they agree on every value.
+        if ids.nunique(dropna=True) < 0.75 * ids.notna().sum():
+            continue
+        dup_ids = ids[ids.duplicated(keep=False) & ids.notna()].unique()
+        drop_idx = []
+        for rid in dup_ids:
+            group = df_c[ids == rid]
+            if _rows_agree(group):
+                keep = group.notna().sum(axis=1).idxmax()
+                drop_idx.extend(i for i in group.index if i != keep)
+        if drop_idx:
+            df_c = df_c.drop(index=drop_idx)
+            log.append(f"✓ Removed {len(drop_idx)} repeated record(s) with the same '{col}' (kept the most complete copy)")
 
-            if total_row_nulls > 0:
-                log.append(
-                    f"⚠ Left {total_row_nulls} null(s) in '{col}' as-is in what looks like a "
-                    f"totals/summary row — filling those would fabricate a number, not describe one"
-                )
-
-        elif pd.api.types.is_datetime64_any_dtype(df_c[col]):
-            # Don't guess dates — leave as NaT, but log it clearly
-            log.append(f"⚠ '{col}' has {null_count} missing date(s) — left as-is (no safe default)")
-
-        else:
-            fillable_mask = df_c[col].isnull() & ~is_total_row
-            if fillable_mask.any():
-                df_c.loc[fillable_mask, col] = df_c.loc[fillable_mask, col].fillna("Unknown")
-                log.append(f"✓ Filled {int(fillable_mask.sum())} null(s) in '{col}' with 'Unknown'")
+    # ── 11. Missing values are reported, never invented ───────────────────────
+    # Earlier versions filled blank numbers with the column median and blank
+    # text with 'Unknown' on EVERY query. That fabricated values the user
+    # never wrote, changed averages and counts, and made questions like
+    # "how many invoices have no payment date?" impossible to answer. Blanks
+    # now stay blank: pandas sums, means and counts skip them, and the log
+    # says exactly where they are. (The opt-in Data Quality Agent can still
+    # propose an imputation the user explicitly accepts.)
+    for col in df_c.columns:
+        null_count = int(df_c[col].isnull().sum())
+        if null_count:
+            log.append(f"⚠ '{col}' has {null_count} missing value(s) — left blank (calculations skip them; nothing was filled in)")
 
     df_c = df_c.reset_index(drop=True)
     if not log:

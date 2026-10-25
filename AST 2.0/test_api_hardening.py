@@ -1,8 +1,9 @@
 """
 test_api_hardening.py — the real FastAPI app, driven through TestClient with
-file downloads stubbed: shared-secret auth (+audit), X-Request-ID, per-session
-429 + Retry-After, per-IP backstop, blob/result caching, piiReport in /profile,
-/admin/stats, and that the audit log never contains file contents.
+uploaded-file loading stubbed: shared-secret auth (+audit), X-Request-ID,
+per-session 429 + Retry-After, per-IP backstop, result caching, piiReport in
+/profile, /admin/stats, that remote URLs are refused (SSRF), and that the
+audit log never contains file contents.
 
 Run: python3 test_api_hardening.py
 """
@@ -19,6 +20,12 @@ for k in ("RATE_LIMIT_ENABLED", "RATE_LIMIT_MULTIPLIER", "CACHE_ENABLED"):
 from fastapi.testclient import TestClient
 import api, audit_log, cache_layer, rate_limiter
 
+# api.py loads the developer's real .env with override=True on import, which
+# would replace the test secret set above. Pin it back so the test always
+# authenticates with its own secret, whatever is in .env.
+os.environ["PYTHON_SERVICE_SECRET"] = "s3cret-for-tests"
+api.SERVICE_SECRET = "s3cret-for-tests"
+
 FAIL = []
 def check(label, cond, detail=""):
     print(f"[{'OK' if cond else 'FAIL'}] {label}" + (f" — {detail}" if detail and not cond else ""))
@@ -29,14 +36,17 @@ CSV = (b"customer_name,email,city,amount\n"
        b"Vikram Shah,vikram@example.org,Delhi,300\n"
        b"Neha Iyer,neha@example.in,Pune,99\n")
 fetches = {"n": 0}
-class FakeResp:
-    def __init__(self, c): self.content = c
-    def raise_for_status(self): pass
-def fake_get(url, timeout=None):
+def fake_load(url):
+    # Stands in for local_store.load: files uploaded via POST /upload are
+    # referenced as local://<id>. "dead" simulates an expired upload.
     fetches["n"] += 1
-    if "dead" in url: raise ConnectionError("unreachable")
-    return FakeResp(CSV)
-api.requests.get = fake_get
+    return None if "dead" in url else CSV
+api.local_store.load = fake_load
+remote_calls = {"n": 0}
+def must_not_fetch(*a, **k):
+    remote_calls["n"] += 1
+    raise AssertionError("the API must never download a remote URL")
+api.requests.get = must_not_fetch
 
 H = {"x-service-secret": "s3cret-for-tests"}
 def log_records():
@@ -53,9 +63,9 @@ def main():
         print("=" * 70); print("PART 1 — auth and request ids"); print("=" * 70)
         r = c.get("/health")
         check("/health needs no secret", r.status_code == 200)
-        r = c.post("/profile", json={"fileUrl": "https://blob/x1", "filename": "a.csv"})
+        r = c.post("/profile", json={"fileUrl": "local://x1", "filename": "a.csv"})
         check("missing secret -> 401", r.status_code == 401)
-        r = c.post("/profile", json={"fileUrl": "https://blob/x1", "filename": "a.csv"}, headers={"x-service-secret": "wrong"})
+        r = c.post("/profile", json={"fileUrl": "local://x1", "filename": "a.csv"}, headers={"x-service-secret": "wrong"})
         check("wrong secret -> 401", r.status_code == 401)
         check("401 responses still carry X-Request-ID", bool(r.headers.get("x-request-id")))
         ev = [x["event"] for x in log_records()]
@@ -64,7 +74,7 @@ def main():
               "s3cret-for-tests" not in open(LOG).read() and '"wrong"' not in open(LOG).read())
 
         print("\n" + "=" * 70); print("PART 2 — /profile: PII report, caching"); print("=" * 70)
-        body = {"fileUrl": "https://blob/file-1", "filename": "customers.csv", "sessionId": "sess-A"}
+        body = {"fileUrl": "local://file-1", "filename": "customers.csv", "sessionId": "sess-A"}
         r1 = c.post("/profile", json=body, headers=H)
         j = r1.json()
         check("profile succeeds", r1.status_code == 200 and j.get("success"), str(j)[:200])
@@ -73,24 +83,29 @@ def main():
         check("piiReport flags name and email", {"customer_name", "email"} <= cols, str(cols))
         check("piiReport does not flag city/amount", not ({"city", "amount"} & cols))
         check("request id is returned", bool(r1.headers.get("x-request-id")))
-        n_after_first = fetches["n"]
         r2 = c.post("/profile", json=body, headers=H)
         check("second identical request returns the same answer", r2.json() == j)
-        check("second request did not re-download the file (blob cache)", fetches["n"] == n_after_first)
         check("result cache recorded a hit", cache_layer.stats()["result"]["hits"] >= 1)
         r3 = c.post("/profile", json={**body, "filename": "renamed.csv"}, headers=H)
         check("a different filename is not served a stale echo", r3.json().get("filename", "renamed.csv") == "renamed.csv")
-        d = c.post("/profile", json={"fileUrl": "https://blob/dead", "filename": "d.csv"}, headers=H).json()
-        check("an unreachable file gives a clean error, not a 500", d.get("success") is False and "Could not fetch" in d.get("error", ""))
+        d = c.post("/profile", json={"fileUrl": "local://dead", "filename": "d.csv"}, headers=H).json()
+        check("an expired upload gives a clean error, not a 500", d.get("success") is False and "no longer available" in d.get("error", ""))
+
+        print("\n" + "=" * 70); print("PART 2b — remote URLs are refused (SSRF)"); print("=" * 70)
+        for url in ("https://example.com/a.csv", "http://169.254.169.254/latest/meta-data/", "file:///etc/passwd"):
+            d = c.post("/profile", json={"fileUrl": url, "filename": "a.csv"}, headers=H).json()
+            check(f"refuses {url}", d.get("success") is False and "uploaded through this app" in d.get("error", ""), str(d)[:120])
+        check("no remote download was ever attempted", remote_calls["n"] == 0)
+        check("refusals are audited", any(x["event"] == "blocked_remote_url" for x in log_records()))
 
         print("\n" + "=" * 70); print("PART 3 — rate limiting (real 429s)"); print("=" * 70)
         rate_limiter.limiter.reset()
-        codes = [c.post("/clean", json={"fileUrl": "https://blob/rl", "filename": "a.csv"}, headers=H).status_code for _ in range(32)]
+        codes = [c.post("/clean", json={"fileUrl": "local://rl", "filename": "a.csv"}, headers=H).status_code for _ in range(32)]
         check("light policy: first 30/min pass, then 429", codes[:30].count(200) == 30 and 429 in codes[30:], str(codes))
-        r = c.post("/clean", json={"fileUrl": "https://blob/rl", "filename": "a.csv"}, headers=H)
+        r = c.post("/clean", json={"fileUrl": "local://rl", "filename": "a.csv"}, headers=H)
         check("429 carries Retry-After", r.status_code == 429 and int(r.headers.get("retry-after", 0)) >= 1)
         check("429 body is a readable error", "Too many requests" in json.dumps(r.json()))
-        r = c.post("/clean", json={"fileUrl": "https://blob/other-file", "filename": "a.csv"}, headers=H)
+        r = c.post("/clean", json={"fileUrl": "local://other-file", "filename": "a.csv"}, headers=H)
         check("a different caller/file key is unaffected", r.status_code == 200)
         check("rate_limited events are audited", any(x["event"] == "rate_limited" for x in log_records()))
 
@@ -103,7 +118,7 @@ def main():
         api.run_auto_analyze = lambda content, filename, session_id: {"success": True}
         rate_limiter.limiter._clock = lambda: 1000.0
         try:
-            codes = [c.post("/auto-analyze", json={"sessionId": "hammer", "fileUrl": "https://blob/h", "filename": "a.csv"},
+            codes = [c.post("/auto-analyze", json={"sessionId": "hammer", "fileUrl": "local://h", "filename": "a.csv"},
                             headers=H).status_code for _ in range(6)]
         finally:
             api.run_auto_analyze, rate_limiter.limiter._clock = real_auto, real_clock
@@ -120,11 +135,12 @@ def main():
         check("/admin/stats requires the secret", c.get("/admin/stats").status_code == 401)
         s = c.get("/admin/stats", headers=H).json()
         check("stats has cache / rateLimiter / audit sections", {"cache", "rateLimiter", "audit"} <= set(s))
+        check("stats reports sandbox memory cap and LLM usage", "sandboxMemoryCap" in s and "calls" in s.get("llmUsage", {}))
         check("audit chain verifies as intact after all of the above", s["audit"]["chain"]["ok"], str(s["audit"]["chain"]))
         check("event counts include request and rate_limited",
               s["audit"]["eventCounts"].get("request", 0) > 0 and s["audit"]["eventCounts"].get("rate_limited", 0) > 0)
         raw = open(LOG, encoding="utf-8").read()
-        for secret in ("asha.secret@example.com", "Asha Rao", "vikram@example.org", "https://blob/file-1"):
+        for secret in ("asha.secret@example.com", "Asha Rao", "vikram@example.org", "local://file-1"):
             check(f"audit log never contains {secret!r}", secret not in raw)
         check("requests carry method/path/status/duration",
               any(x["event"] == "request" and x.get("path") == "/profile" and x.get("status") == 200 and "duration_ms" in x for x in log_records()))

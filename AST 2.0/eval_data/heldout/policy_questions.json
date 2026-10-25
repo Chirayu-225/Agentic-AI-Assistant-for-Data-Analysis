@@ -1,0 +1,18 @@
+[
+  {"id": "RAG01", "question": "What are the standard vendor payment terms?", "expect_all": ["45"], "answerable": true},
+  {"id": "RAG02", "question": "Who must approve a purchase order of 10,00,000 rupees?", "expect_all": ["Finance Controller"], "answerable": true},
+  {"id": "RAG03", "question": "What is the hotel cap per night in metro cities?", "expect_all": ["9,000"], "answerable": true},
+  {"id": "RAG04", "question": "Within how many days must expense claims be submitted?", "expect_all": ["30 days"], "answerable": true},
+  {"id": "RAG05", "question": "What is the domestic daily meal allowance?", "expect_all": ["1,500"], "answerable": true},
+  {"id": "RAG06", "question": "When can premium economy be booked?", "expect_all": ["8 hours"], "answerable": true},
+  {"id": "RAG07", "question": "Above what amount does an expense claim need an itemised receipt?", "expect_all": ["2,000"], "answerable": true},
+  {"id": "RAG08", "question": "Who are overdue invoices older than 90 days escalated to?", "expect_all": ["Accounts Payable Manager"], "answerable": true},
+  {"id": "RAG09", "question": "What is the international daily meal allowance?", "expect_all": ["60"], "answerable": true},
+  {"id": "RAG10", "question": "What is the hotel cap per night in tier-2 cities?", "expect_all": ["6,000"], "answerable": true},
+  {"id": "RAG11", "question": "How often are laptops replaced?", "expect_all": ["4"], "answerable": true},
+  {"id": "RAG12", "question": "Who must approve a software subscription costing more than 50,000 rupees a year?", "expect_all": ["IT Security"], "answerable": true},
+  {"id": "RAG13", "question": "What is the monthly corporate card limit for managers?", "expect_all": ["1,00,000"], "answerable": true},
+  {"id": "RAG14", "question": "What is the company's policy on remote work?", "expect_all": [], "answerable": false},
+  {"id": "RAG15", "question": "What was Northwind's revenue in FY2025?", "expect_all": [], "answerable": false},
+  {"id": "RAG16", "question": "How many days of parental leave do employees get?", "expect_all": [], "answerable": false}
+]

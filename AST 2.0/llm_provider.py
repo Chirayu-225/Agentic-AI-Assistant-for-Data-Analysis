@@ -1,82 +1,72 @@
 """
 llm_provider.py — Centralised LLM call layer.
 
-Single source of truth for all model inference in Analyst Assistant.
-Backed by Groq API — fast, free-tier-generous, production models only.
+Single source of truth for all model inference. Every other module calls
+llm_code_call / llm_chat_call / llm_uncached_code_call from here.
 
-All other modules import from here instead of calling ollama directly.
-Swapping providers in future = change this file only.
+PRIMARY: Groq (GROQ_API_KEY)
+    CODE slot  → openai/gpt-oss-20b   (fast pandas/SQL generation)
+    CHAT slot  → openai/gpt-oss-120b  (insights, RAG answers, follow-ups)
+    Override with GROQ_CODE_MODEL / GROQ_CHAT_MODEL without a code change.
 
-Environment variable required:
-    GROQ_API_KEY  — get a free key at https://console.groq.com
+FALLBACK (optional): any OpenAI-compatible /chat/completions endpoint.
+    Groq has retired this app's models twice (llama-3.1-8b-instant and
+    llama-3.3-70b-versatile were shut down 2026-08-16; every request then
+    404'd). A single provider is a single point of failure, so if the
+    primary call fails and these are set, the same prompt is retried on
+    the fallback:
+        FALLBACK_LLM_BASE_URL   e.g. https://api.openai.com/v1
+        FALLBACK_LLM_API_KEY
+        FALLBACK_CODE_MODEL     model for the CODE slot
+        FALLBACK_CHAT_MODEL     model for the CHAT slot (defaults to CODE)
+    Uses plain HTTP via `requests`, so no extra SDK is needed.
 
-Models used:
-    CODE  → openai/gpt-oss-20b   (fast pandas/code gen)
-    CHAT  → openai/gpt-oss-120b  (best reasoning for insights/RAG)
+DAILY CAP: LLM_DAILY_CALL_LIMIT (default 400) caps real model calls per
+UTC day across ALL users, so a public demo can pause but can never drain
+the Groq quota. Cached answers don't count. The count is kept in
+logs/llm_usage.json so a restart doesn't reset it. Set the limit to 0 to
+disable the cap (not recommended for anything public).
 
-MODEL MIGRATION NOTE (2026-08-26)
-    Originally llama-3.1-8b-instant / llama-3.3-70b-versatile. Groq
-    announced deprecation of both on 2026-06-17 and shut them down
-    2026-08-16 — after that date, every request returned a 404
-    model_not_found error, which is what surfaced as "LLM code call
-    failed: Error code: 404 ... model_not_found" in the app. Not a bug
-    in this codebase — an upstream model retirement. Migrated to Groq's
-    own recommended replacements (openai/gpt-oss-20b and
-    openai/gpt-oss-120b respectively). If you ever see a 404
-    model_not_found error again, check
-    https://console.groq.com/docs/deprecations first — this is the
-    second time Groq has retired a model this app depended on, so it's
-    likely to happen again eventually.
+No Streamlit dependency: this module used to import streamlit for
+st.cache_data and st.error, which made a UI library load-bearing inside
+the FastAPI service. The code-generation cache is now a small in-process
+TTL + LRU cache below, keyed on (model, prompt, temperature, session_id)
+so one session's generated code is never returned to another session.
 """
 
+from __future__ import annotations
+
+import hashlib
+import json
 import os
-import streamlit as st
-from groq import Groq
+import threading
+import time
+from collections import OrderedDict
+from datetime import datetime, timezone
 
-# ── Model names ───────────────────────────────────────────────────────────────
-# Split into two roles so each is optimised for its task:
-#   CODE — speed matters most (code gen, cleaning, retries)
-#   CHAT — quality matters most (business insights, RAG answers)
-_CODE_MODEL = "openai/gpt-oss-20b"
-_CHAT_MODEL = "openai/gpt-oss-120b"
+_CODE_MODEL = os.environ.get("GROQ_CODE_MODEL", "openai/gpt-oss-20b")
+_CHAT_MODEL = os.environ.get("GROQ_CHAT_MODEL", "openai/gpt-oss-120b")
 
-# ── Client (lazy singleton) ───────────────────────────────────────────────────
-_client: Groq | None = None
+_client = None
 
 
-def _get_client() -> Groq:
-    """Return a cached Groq client. Raises a clear error if key is missing."""
+def _get_client():
+    """Return a cached Groq client. Raises a clear error if the key is missing."""
     global _client
     if _client is not None:
         return _client
-
     api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        st.error(
-            "⚠ **GROQ_API_KEY not set.**  \n"
-            "Add it to your `.env` file locally, or to Streamlit Cloud → "
-            "App Settings → Secrets as `GROQ_API_KEY = \"gsk_...\"`.  \n"
-            "Get a free key at https://console.groq.com",
-            icon="🔑",
+        raise RuntimeError(
+            "GROQ_API_KEY is not set. Add it to the backend's .env "
+            "(see .env.example). Get a key at https://console.groq.com"
         )
-        raise RuntimeError("GROQ_API_KEY environment variable not set.")
-
+    from groq import Groq
     _client = Groq(api_key=api_key)
     return _client
 
 
-# ── Core call ─────────────────────────────────────────────────────────────────
-
-def _call(
-    prompt: str,
-    temperature: float,
-    model: str,
-    max_tokens: int = 2048,
-) -> str:
-    """
-    Single raw call to Groq. Returns the assistant message text.
-    Raises on network/auth errors — callers handle fallback logic.
-    """
+def _call_groq(prompt: str, temperature: float, model: str, max_tokens: int) -> str:
     client = _get_client()
     kwargs = {}
     if model.startswith("openai/gpt-oss"):
@@ -103,35 +93,172 @@ def _call(
     return text
 
 
-# ── Public interface — drop-in replacements for ollama.chat patterns ──────────
+def _fallback_model(slot: str) -> str | None:
+    code = os.environ.get("FALLBACK_CODE_MODEL", "")
+    if slot == "chat":
+        return os.environ.get("FALLBACK_CHAT_MODEL", "") or code or None
+    return code or None
 
-@st.cache_data(show_spinner=False, ttl=3600)
+
+def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) -> str:
+    import requests
+    base = os.environ.get("FALLBACK_LLM_BASE_URL", "").rstrip("/")
+    key = os.environ.get("FALLBACK_LLM_API_KEY", "")
+    model = _fallback_model(slot)
+    resp = requests.post(
+        f"{base}/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": model, "messages": [{"role": "user", "content": prompt}],
+              "temperature": temperature, "max_tokens": max_tokens},
+        timeout=90,
+    )
+    resp.raise_for_status()
+    text = (resp.json()["choices"][0]["message"].get("content") or "")
+    if not text.strip():
+        raise RuntimeError(f"Fallback model {model} returned an empty answer.")
+    return text
+
+
+def fallback_configured() -> bool:
+    return bool(os.environ.get("FALLBACK_LLM_BASE_URL") and os.environ.get("FALLBACK_LLM_API_KEY")
+                and _fallback_model("code"))
+
+
+# ── Daily usage cap ───────────────────────────────────────────────────────────
+
+class DailyLimitReached(RuntimeError):
+    """Raised when today's LLM call budget is spent."""
+
+
+_usage_lock = threading.Lock()
+_usage_path = os.environ.get(
+    "LLM_USAGE_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "llm_usage.json"),
+)
+_usage = {"day": "", "calls": 0}
+
+
+def _daily_limit() -> int:
+    try:
+        return max(0, int(os.environ.get("LLM_DAILY_CALL_LIMIT", "400")))
+    except ValueError:
+        return 400
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _load_usage() -> None:
+    try:
+        with open(_usage_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("calls"), int):
+            _usage.update(day=str(data.get("day", "")), calls=data["calls"])
+    except (OSError, ValueError):
+        pass  # missing or unreadable file = start counting from zero
+
+
+def _save_usage() -> None:
+    try:
+        os.makedirs(os.path.dirname(_usage_path), exist_ok=True)
+        tmp = _usage_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_usage, f)
+        os.replace(tmp, _usage_path)
+    except OSError:
+        pass  # counting still works in memory if the disk is read-only
+
+
+def _reserve_call() -> None:
+    """Counts one model call against today's budget, or refuses it."""
+    limit = _daily_limit()
+    with _usage_lock:
+        if not _usage["day"]:
+            _load_usage()
+        today = _today()
+        if _usage["day"] != today:
+            _usage.update(day=today, calls=0)
+        if limit and _usage["calls"] >= limit:
+            raise DailyLimitReached(
+                "The daily AI usage limit for this demo has been reached. "
+                "It resets at 00:00 UTC (05:30 IST)."
+            )
+        _usage["calls"] += 1
+        _save_usage()
+
+
+def usage_stats() -> dict:
+    """For /admin/stats."""
+    with _usage_lock:
+        if not _usage["day"]:
+            _load_usage()
+        calls = _usage["calls"] if _usage["day"] == _today() else 0
+    limit = _daily_limit()
+    return {"day": _today(), "calls": calls, "limit": limit or None,
+            "remaining": (limit - calls) if limit else None}
+
+
+def _call(prompt: str, temperature: float, model: str, max_tokens: int = 2048) -> str:
+    """Primary call, then the optional fallback provider. Raises only if
+    every configured provider failed — callers handle that."""
+    _reserve_call()
+    slot = "chat" if model == _CHAT_MODEL else "code"
+    try:
+        return _call_groq(prompt, temperature, model, max_tokens)
+    except Exception as primary_error:
+        if not fallback_configured():
+            raise
+        print(f"[llm] primary ({model}) failed: {primary_error} — trying fallback provider", flush=True)
+        try:
+            return _call_fallback(prompt, temperature, slot, max_tokens)
+        except Exception as fallback_error:
+            raise RuntimeError(
+                f"primary failed ({primary_error}); fallback failed ({fallback_error})"
+            ) from fallback_error
+
+
+# ── Code-generation cache (replaces st.cache_data) ────────────────────────────
+
+_CACHE_TTL_SECONDS = 3600
+_CACHE_MAX_ENTRIES = 512
+_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _cache_key(model: str, prompt: str, temperature: float, session_id: str) -> str:
+    h = hashlib.sha256()
+    for part in (model, f"{temperature:.3f}", session_id, prompt):
+        h.update(part.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
 def cached_llm_call(model: str, prompt_text: str, temperature: float, session_id: str = "") -> str:
-    """
-    Cached wrapper — identical (model, prompt, temp, session_id) returns
-    instantly. Mirrors the signature used in query_engine.py.
-
-    session_id is folded into the cache key purely for isolation, not for
-    lookup — st.cache_data's cache is process-wide (shared across every
-    browser session hitting this server), not per-session. Without
-    session_id in the key, two different users asking the same question
-    on identically-shaped data could get back each other's cached
-    generated code. Including it means each session gets its own cache
-    entries, at the cost of losing cross-user cache hits — an acceptable
-    trade once this runs on shared infrastructure instead of localhost.
-    """
-    return _call(prompt_text, temperature, model)
+    """Identical (model, prompt, temperature, session_id) returns the cached
+    answer for up to an hour. session_id is part of the key so two users
+    asking the same question on identically-shaped data never receive each
+    other's generated code. Set CACHE_ENABLED=0 to bypass."""
+    if os.environ.get("CACHE_ENABLED", "1") == "0":
+        return _call(prompt_text, temperature, model)
+    key = _cache_key(model, prompt_text, temperature, session_id)
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < _CACHE_TTL_SECONDS:
+            _cache.move_to_end(key)
+            return hit[1]
+    text = _call(prompt_text, temperature, model)
+    with _cache_lock:
+        _cache[key] = (now, text)
+        _cache.move_to_end(key)
+        while len(_cache) > _CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
+    return text
 
 
 def llm_code_call(prompt_text: str, temperature: float = 0.1, session_id: str = "") -> str:
-    """
-    For code generation queries (analysis, cleaning, retry).
-    Uses the code-optimised model slot.
-    Falls back gracefully and surfaces error to the caller.
-
-    Pass the caller's session_id (or eventual user_id) so the cache below
-    can't return one session's generated code to a different session.
-    """
+    """Code generation (analysis, cleaning, retry). Cached per session."""
     try:
         return cached_llm_call(_CODE_MODEL, prompt_text, temperature, session_id)
     except Exception as e:
@@ -139,10 +266,7 @@ def llm_code_call(prompt_text: str, temperature: float = 0.1, session_id: str = 
 
 
 def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
-    """
-    For natural language queries (insights, explanations, RAG answers).
-    Uses the chat/reasoning model slot.
-    """
+    """Natural-language work (insights, explanations, RAG answers). Never cached."""
     try:
         return _call(prompt_text, temperature, _CHAT_MODEL, max_tokens=4096)
     except Exception as e:
@@ -150,11 +274,18 @@ def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
 
 
 def llm_uncached_code_call(prompt_text: str, temperature: float = 0.0) -> str:
-    """
-    For one-shot calls that must NOT be cached (cleaning retry, error retry).
-    Always hits the API — avoids stale cached code for a different error context.
-    """
+    """One-shot code calls that must NOT be cached (cleaning retry, error retry)."""
     try:
         return _call(prompt_text, temperature, _CODE_MODEL)
     except Exception as e:
         raise RuntimeError(f"LLM uncached code call failed: {e}") from e
+
+
+def _clear_code_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+# Same call shape st.cache_data exposed, so existing callers/tests that do
+# cached_llm_call.clear() keep working.
+cached_llm_call.clear = _clear_code_cache  # type: ignore[attr-defined]

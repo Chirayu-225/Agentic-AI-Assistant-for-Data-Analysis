@@ -1,6 +1,8 @@
 # Agentic AI Assistant for Data Analysis
 
-An AI-powered data analysis platform that turns natural-language questions into real computation — not guessed numbers. It analyzes CSVs and Excel files, extracts and analyzes structured tables buried inside PDFs, and joins across multiple datasets with real SQL, all while every LLM-generated operation runs inside a sandboxed execution engine before it ever touches your data.
+**Verified answers from finance and operations spreadsheets.** Built for the analyst who gets a messy export (invoices, expenses, store KPIs) and needs numbers they can defend in a meeting.
+
+An AI-powered data analysis platform that turns natural-language questions into real computation — not guessed numbers — and shows the computation behind every answer. It analyzes CSVs and Excel files, extracts and analyzes structured tables buried inside PDFs, and joins across multiple datasets with real SQL, all while every LLM-generated operation runs inside a sandboxed execution engine before it ever touches your data.
 
 <p>
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black">
@@ -26,15 +28,17 @@ This project takes a different position: **an LLM should decide what to compute,
 - **Transparent, consent-based cleaning** — deterministic rule-based cleaning (currency symbols, percentages, thousands separators, identifier-column detection so postal codes and account numbers never get averaged) runs only after the user explicitly opts in, never silently.
 - **Autonomous Data Quality Agent** — goes beyond null-filling. Diagnoses inconsistent category spellings ("USA" / "U.S." / "United States"), implausible outliers, structurally meaningful blanks (e.g. a deliberately empty "Total" row in a financial table), and other defects a fixed set of regexes can't catch — then proposes and applies fixes, with the full diagnosis kept as an inspectable audit trail.
 - **Ask-a-question query panel** — natural language in, real pandas/Plotly code out, executed in the sandbox, returned as a table, chart, or scalar.
-- **Auto-Analyze** — five ranked business insights, each paired with a concrete recommended action, plus up to three charts the model chooses specifically to make those insights visible at a glance. Every chart is its own sandboxed execution, not a template.
+- **Verified Auto-Analyze** — up to five ranked business insights, each with a recommended action, built in four steps: the model *plans* computations (question + pandas code, no numbers), the sandbox *computes* them on your data, the model *writes* findings from those results only, and `insight_verifier.py` *verifies* that every number in each finding matches the computed result. Findings that fail verification are dropped, and the UI says how many were dropped. Each shown insight carries a ✓ VERIFIED badge and its question, code and computed result. Up to three supporting charts follow, each its own sandboxed execution.
+- **Show the work** — every answer (query panel, insights, charts, multi-dataset SQL) has a "How this was computed" panel with the exact code or SQL that ran and, for insights, the computed result. Answers state their basis ("rule-based shortcut", "AI-written pandas code, run in the sandbox", rows analysed) instead of a HIGH/MEDIUM/LOW "confidence" that only measured whether code ran.
 - **Grounded follow-up Q&A** — ask a question about an insight or a business decision. The model first decides whether answering precisely needs a real number computed from the data; if so, it writes and runs that computation before answering. For open-ended "why" questions, it can explore several independent angles (pricing, order size, regional concentration) rather than stopping at one shot.
 - **Downloadable PDF report** — a client-side generated report bundling insights, charts, and the follow-up conversation into a clean, print-ready document.
 
 ### 📄 Document Intelligence (RAG)
-- Indexes PDFs, DOCX, and text documents for retrieval-augmented Q&A and auto-extracted key insights.
+- Indexes PDFs, DOCX, and text documents for retrieval-augmented Q&A and auto-extracted key insights. *(Beta.)*
+- **Answers cite their sources** — each answer cites `(Passage N)` and lists the retrieved passages underneath, so every claim can be checked against the document.
 - **Structured data extraction** — detects real tables inside PDFs and routes them into the *same* CSV analysis pipeline used for uploads, rather than summarizing them as text. A number from a table inside a PDF gets the same real-computation guarantee as a number from an uploaded spreadsheet.
 
-### 🔗 Multi-Dataset SQL Queries
+### 🔗 Multi-Dataset SQL Queries *(Beta)*
 - Upload two or more related datasets, give each a short alias, and ask one question that spans all of them.
 - Real SQL — joins, aggregations, grouping — powered by an embedded analytical database, not a text summary stitched together from separate files.
 
@@ -60,7 +64,8 @@ Defences you can inspect after the fact, not just trust:
 - **PII protection** (`pii_redaction.py`) — checksum-validated detection (Luhn cards, Verhoeff Aadhaar), PAN, Indian mobile, UPI, SSN, email, phone. Columns *named* like personal data (name, email, phone, address, DOB...) are withheld from every LLM prompt by default. `/profile` returns a `piiReport` the UI shows before any AI step.
 - **Caching** (`cache_layer.py`) — byte-bounded LRU+TTL caches for downloads, parsed/cleaned frames and deterministic `/profile` and `/clean` results, keyed on content hash. LLM-backed answers are deliberately never cached.
 - **Found by its own evaluation harness:** running the harness against real model output exposed (1) a sandbox escape (`df._obj` returned the raw DataFrame, so generated code could write files) — now blocked at the AST layer and regression-tested; (2) the proxy had no operator support, so every filter (`df[df['x'] > 5]`) and derived column failed — fixed; (3) common pandas idioms (`idxmax`, `loc`, `iloc`, `isin`) were blocked — added behind a restricted indexer proxy; (4) the no-LLM shortcut layer answered "list regions ranked by total revenue" with the grand total — shortcuts now only fire for plain whole-column questions.
-- **Evaluation harness** (`eval_harness.py`) — measures accuracy against ground-truth answers you compute independently, with Wilson 95% intervals, failure taxonomy, latency and repeat-consistency. See below.
+- **Evaluation harness** (`eval_harness.py`) — measures accuracy against ground-truth answers you compute independently, with Wilson 95% intervals, failure taxonomy, latency and repeat-consistency. A separate **held-out** set and insight/RAG evals guard against tuning to the test. See below.
+- **Fence markers can't be forged** — untrusted data is fenced with a random per-request tag, and marker-like text inside the data is defanged, so a cell can't close the fence early.
 
 ## Architecture
 
@@ -97,7 +102,7 @@ flowchart TD
 
 **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS, Plotly.js, jsPDF
 **Backend:** FastAPI, Python, pandas, NumPy
-**AI / LLM:** Groq-hosted Llama models, with dual-model routing (a fast model for code generation, a larger model for reasoning)
+**AI / LLM:** Groq-hosted `openai/gpt-oss-20b` (code generation) and `openai/gpt-oss-120b` (insights, RAG, follow-ups), overridable via env; optional fallback to any OpenAI-compatible endpoint if Groq fails
 **Data engines:** DuckDB (SQL joins), ChromaDB (vector store for RAG)
 **Document processing:** pdfplumber (table extraction), pypdf, python-docx
 **Storage:** Uploaded files are stored on the backend's local disk (no cloud storage account needed)
@@ -105,31 +110,39 @@ flowchart TD
 ## Project Structure
 
 ```
-├── frontend/                    # Next.js app
+├── AST NextJS/                  # Next.js frontend
 │   ├── app/api/                 # API routes proxying to the Python backend
-│   ├── components/              # CsvAnalysisTab, DocumentIntelligenceTab,
-│   │                             # MultiTableTab, and their sub-components
+│   ├── components/              # CsvAnalysisTab, DocumentIntelligenceTab, MultiTableTab,
+│   │                            # ShowWork ("How this was computed"), and sub-components
 │   └── lib/                     # Python service client, PDF report generator
 │
-└── backend/                     # FastAPI service
+└── AST 2.0/                     # FastAPI backend
     ├── api.py                   # Route definitions
+    ├── llm_provider.py          # Groq calls, per-session code cache, optional fallback provider
     ├── file_reader.py           # Unified CSV/Excel reader
-    ├── cleaning.py               # Deterministic rule-based cleaning
-    ├── cleaning_agent.py         # Autonomous data quality agent
-    ├── analysis_service.py       # Single-dataset query engine
-    ├── auto_analyze_service.py   # Insights + chart generation
-    ├── multi_table_service.py    # Multi-dataset SQL joins (DuckDB)
-    ├── table_extraction.py       # PDF table detection
-    ├── rag_engine.py             # Document indexing + retrieval
-    ├── sandbox.py                # AST-level safety guard
-    ├── sandbox_proxy.py          # Attribute-allowlisting proxies
-    ├── sandbox_limits.py         # Subprocess isolation, timeout, memory caps
-    ├── audit_log.py              # Tamper-evident audit trail
-    ├── rate_limiter.py           # Sliding-window rate limits
-    ├── pii_redaction.py          # PII detection + personal-column withholding
-    ├── cache_layer.py            # Bounded LRU/TTL caches
-    ├── eval_harness.py           # Ground-truth accuracy evaluation
-    └── test_*.py                 # run with: python3 test_<name>.py
+    ├── cleaning.py              # Deterministic rule-based cleaning
+    ├── cleaning_agent.py        # Autonomous data quality agent
+    ├── analysis_service.py      # Single-dataset query engine (returns code + basis)
+    ├── auto_analyze_service.py  # Verified insights (plan → compute → write → verify) + charts
+    ├── insight_verifier.py      # Deterministic number-matching verifier
+    ├── multi_table_service.py   # Multi-dataset SQL joins (DuckDB)
+    ├── table_extraction.py      # PDF table detection
+    ├── rag_engine.py            # Document indexing + retrieval + cited answers
+    ├── sandbox.py               # AST-level safety guard
+    ├── sandbox_proxy.py         # Attribute-allowlisting proxies
+    ├── sandbox_limits.py        # Subprocess isolation, timeout, memory caps
+    ├── audit_log.py             # Tamper-evident audit trail
+    ├── rate_limiter.py          # Sliding-window rate limits
+    ├── pii_redaction.py         # PII detection + personal-column withholding
+    ├── prompt_injection_guard.py# Randomly tagged untrusted-data fences
+    ├── cache_layer.py           # Bounded LRU/TTL caches
+    ├── eval_harness.py          # Ground-truth accuracy evaluation (dev set)
+    ├── eval_heldout.py          # Held-out accuracy across 3 messy datasets
+    ├── eval_insights.py         # Verified-insight drop rate + independent re-check
+    ├── eval_rag.py              # Document Q&A faithfulness
+    ├── eval_data/heldout/       # Held-out datasets, questions, and their generator
+    ├── ui.py, legacy_streamlit/ # Legacy Streamlit UI (needs `pip install streamlit`)
+    └── test_*.py                # run with: python test_<name>.py
 ```
 
 ## Getting Started
@@ -142,7 +155,7 @@ flowchart TD
 ### Backend
 
 ```bash
-cd backend
+cd "AST 2.0"
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -162,7 +175,7 @@ uvicorn api:app --reload --port 8000
 ### Frontend
 
 ```bash
-cd frontend
+cd "AST NextJS"
 npm install
 ```
 
@@ -191,6 +204,8 @@ npm run dev
 | `MAX_UPLOAD_MB` / `LOCAL_UPLOAD_TTL_HOURS` | 200 / 24 | Largest accepted upload; hours before an uploaded file is deleted |
 | `CACHE_BLOB_MB` / `CACHE_FRAME_MB` / `CACHE_RESULT_MB` | 64 / 96 / 16 | Memory budgets |
 | `PII_WITHHOLD_PERSONAL_COLUMNS` | on | `0` sends personal-named columns to the LLM (not recommended) |
+| `GROQ_CODE_MODEL` / `GROQ_CHAT_MODEL` | `openai/gpt-oss-20b` / `openai/gpt-oss-120b` | Swap models without a code change (Groq has retired this app's models before) |
+| `FALLBACK_LLM_BASE_URL` / `FALLBACK_LLM_API_KEY` / `FALLBACK_CODE_MODEL` / `FALLBACK_CHAT_MODEL` | unset | OpenAI-compatible provider used only when a Groq call fails |
 | `PII_USE_NER` | off | `1` enables the optional spaCy name detector (needs `spacy` + a model; untested adapter) |
 
 `GET /admin/stats` (secret-protected) reports cache hit rates, limiter counters and whether the audit chain is intact.
@@ -206,6 +221,19 @@ python eval_harness.py --dataset eval_data/sample_sales.csv --questions eval_dat
 ```
 Results land in `eval_results/<timestamp>/` (`report.md`, `results.csv`, `summary.json`). Small question sets give wide intervals; the report prints them.
 
+### Dev set vs. held-out set
+
+`eval_data/sample_*.csv` is the **dev set** (24 rows, 9 questions). It was iterated against until it scored 100%, so it now only catches regressions — it is not evidence of accuracy.
+
+`eval_data/heldout/` is the **held-out set**: three files messy in the ways real exports are — an invoice ledger with currency symbols, spelling variants, mixed date formats and a TOTAL row; a wide multi-sheet store KPI workbook with a dashboard tab; and an expense file with duplicates, refunds in parentheses and blank categories — with 47 questions in total. Expected answers are computed from the clean data *before* it is corrupted (`build_heldout.py`), so the app has to recover the truth to score. **Never debug prompts against these files**; if one fails, reproduce it as a new dev question and fix against that.
+
+```bash
+python eval_heldout.py                  # pooled accuracy + interval across all three sets
+python eval_heldout.py --repeat 3       # plus consistency
+python eval_insights.py                 # verified insights shown, drop rate, independent re-check
+python eval_rag.py                      # document Q&A: cites a passage, grounded, refuses unanswerables
+```
+
 ## Known Limitations
 
 Being upfront about where this currently falls short, rather than overselling it:
@@ -215,6 +243,7 @@ Being upfront about where this currently falls short, rather than overselling it
 - **PDF table extraction** works on text-based PDFs with real tabular structure; scanned/image-only PDFs would need OCR, which isn't currently implemented.
 - **Rate limits and caches are per-process and in-memory** — they reset on restart and aren't shared across workers or serverless instances.
 - **Personal-named columns are withheld from the LLM**, so the cleaning agent can't, for example, normalise spellings inside a `customer_name` column.
+- **No accounts or saved history yet** — identity is a per-browser UUID, and a query result is replaced by the next one.
 - **Serverless execution time limits** apply to very long-running analyses on hosted deployments; a background-job architecture would remove this ceiling but isn't currently in place.
 
 ## License

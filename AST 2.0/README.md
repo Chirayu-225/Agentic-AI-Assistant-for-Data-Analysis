@@ -1,3 +1,5 @@
+> **Legacy document.** This README describes the original Streamlit version of the app (`ui.py`, `legacy_streamlit/`). The current product — FastAPI backend in this folder plus the Next.js frontend in `../AST NextJS` — is documented in the repository's top-level `README.md`.
+
 # Analyst Assistant ⚡
 
 An AI-powered data intelligence system for natural language CSV analysis and document Q&A. Built with a modular Python backend, a hardened code execution sandbox, and a Retrieval-Augmented Generation (RAG) pipeline — deployed as a public web app via Streamlit Cloud and Groq API.
@@ -44,8 +46,8 @@ An AI-powered data intelligence system for natural language CSV analysis and doc
     ┌──────▼──────────────────────────────────────────────┐
     │              llm_provider.py                         │
     │  Single source of truth for all LLM calls           │
-    │  ├── llm_code_call()    → llama-3.1-8b-instant      │
-    │  ├── llm_chat_call()    → llama-3.3-70b-versatile   │
+    │  ├── llm_code_call()    → openai/gpt-oss-20b        │
+    │  ├── llm_chat_call()    → openai/gpt-oss-120b       │
     │  └── llm_uncached_code_call() → retries/cleaning    │
     │  Provider: Groq API (free tier)                      │
     └──────┬───────────────────────────────────────────────┘
@@ -100,7 +102,7 @@ An AI-powered data intelligence system for natural language CSV analysis and doc
 ## Key Design Decisions
 
 **Dual-model routing**
-Code generation (pandas, analysis, retries) goes to `llama-3.1-8b-instant` — 560 tokens/sec, deterministic at temperature 0. Business insights and RAG answers go to `llama-3.3-70b-versatile` — better reasoning quality where speed matters less.
+Code generation (pandas, analysis, retries) goes to `openai/gpt-oss-20b` (Groq), low temperature. Business insights and RAG answers go to `openai/gpt-oss-120b` — better reasoning quality where speed matters less.
 
 **Shortcut layer before LLM**
 Common queries (`how many rows`, `show columns`, `describe`, `sort by`, `correlation`, etc.) are detected and answered with direct pandas code — no LLM call, no latency, deterministic output.
@@ -125,8 +127,8 @@ All LLM calls go through `llm_provider.py`. Switching inference providers (Groq 
 |---|---|
 | UI | Streamlit |
 | LLM Inference | Groq API (free tier) |
-| Code Model | `llama-3.1-8b-instant` |
-| Chat / Reasoning Model | `llama-3.3-70b-versatile` |
+| Code Model | `openai/gpt-oss-20b` |
+| Chat / Reasoning Model | `openai/gpt-oss-120b` |
 | Embeddings | `sentence-transformers` / `all-MiniLM-L6-v2` |
 | Vector Store | ChromaDB (in-memory) |
 | Data Processing | pandas, numpy |

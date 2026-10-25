@@ -317,6 +317,7 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
                     "success": False,
                     "error": sbr.error,
                     "reasoning": reasoning,
+                    "code": code,
                     "tables": all_aliases,
                 }
 
@@ -325,6 +326,7 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
                     "success": False,
                     "error": "The query did not return a table — try rephrasing the question.",
                     "reasoning": reasoning,
+                    "code": code,
                     "tables": all_aliases,
                 }
 
@@ -332,6 +334,7 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
             return {
                 "success": True,
                 "reasoning": reasoning,
+                "code": code,
                 "tables": all_aliases,
                 "resultType": "table",
                 "resultData": records,

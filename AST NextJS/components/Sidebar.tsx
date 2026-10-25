@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useClock } from "@/lib/useClock";
 import FileUpload, { UploadedFile } from "@/components/FileUpload";
 
@@ -19,6 +19,43 @@ function StatRow({ label, value, valueClassName = "text-accent" }: StatRowProps)
   );
 }
 
+interface Health {
+  online: boolean;
+  models?: { code?: string; chat?: string } | null;
+  sandboxMemoryCap?: boolean | null;
+}
+
+// "openai/gpt-oss-120b" -> "GPT-OSS 120B"
+function prettyModel(id?: string): string {
+  if (!id) return "—";
+  const name = id.split("/").pop() ?? id;
+  return name.replace(/-(\d+b)$/i, " $1").toUpperCase();
+}
+
+/** Polls /api/health so the sidebar shows real status, not decoration. */
+function useBackendHealth(): Health | null {
+  const [health, setHealth] = useState<Health | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        const data = (await res.json()) as Health;
+        if (!cancelled) setHealth(data);
+      } catch {
+        if (!cancelled) setHealth({ online: false });
+      }
+    }
+    check();
+    const id = setInterval(check, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+  return health;
+}
+
 export default function Sidebar({
   onCsvUploaded,
   onDocUploaded,
@@ -28,6 +65,7 @@ export default function Sidebar({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const time = useClock();
+  const health = useBackendHealth();
 
   if (collapsed) {
     return (
@@ -49,7 +87,7 @@ export default function Sidebar({
           <p className="font-mono text-xs font-bold text-accent tracking-wide">
             ANALYST ASSISTANT
           </p>
-          <p className="font-mono text-[10px] text-muted mt-0.5">v1.0 // SECURE CHANNEL</p>
+          <p className="font-mono text-[10px] text-muted mt-0.5">v1.0</p>
         </div>
         <button
           onClick={() => setCollapsed(true)}
@@ -65,12 +103,20 @@ export default function Sidebar({
       </div>
 
       <div className="border-t border-border pt-3">
-        <StatRow label="SYS_STATUS" value="ONLINE" />
-        <StatRow label="LLM_MODEL" value="GPT-OSS 120B" />
+        {/* Every row here is either measured live (/api/health) or a true
+            statement about the code — no decorative security/uptime claims. */}
+        <StatRow
+          label="BACKEND"
+          value={health === null ? "CHECKING…" : health.online ? "ONLINE" : "OFFLINE"}
+          valueClassName={health === null ? "text-muted" : health.online ? "text-accent" : "text-red-400"}
+        />
+        <StatRow label="CODE_MODEL" value={health?.online ? prettyModel(health.models?.code) : "—"} />
+        <StatRow label="CHAT_MODEL" value={health?.online ? prettyModel(health.models?.chat) : "—"} />
         <StatRow label="INFERENCE" value="GROQ API" />
         <StatRow label="EMBEDDINGS" value="LOCAL · CPU" />
-        <StatRow label="ENCRYPTION" value="AES-256" />
-        <StatRow label="UPTIME" value="99.97%" />
+        {health?.online && health.sandboxMemoryCap === false && (
+          <StatRow label="SANDBOX_MEM_CAP" value="OFF (DEV)" valueClassName="text-yellow-500" />
+        )}
       </div>
 
       <div className="border-t border-border pt-4 flex flex-col gap-5">

@@ -18,6 +18,100 @@ from llm_provider import llm_code_call, llm_chat_call
 # 1. SHORTCUT LAYER
 # ─────────────────────────────────────────────────────────────────────────────
 
+# AI-GENERATED-ANSWER QUALITY — found by the held-out eval: "what is the
+# total amount of OVERDUE invoices?" and "total invoiced amount IN MARCH
+# 2026" matched the "total" shortcut and returned the GRAND total, labelled
+# as a rule-based answer. A shortcut is only safe for a question about the
+# whole column; anything that restricts the rows (a value from the data, a
+# date, a comparison) must go to the full pipeline.
+_FILTER_WORDS = re.compile(
+    r"\b(where|with|without|only|excluding|exclude|except|including|whose|"
+    r"above|below|over|under|greater|less|more than|fewer than|at least|at most|"
+    r"between|during|since|before|after|from|until|within|"
+    r"jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|"
+    r"sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?|"
+    r"q[1-4]|quarter|month|week|year|today|yesterday|ytd|"
+    r"(19|20)\d\d)\b"
+)
+
+
+def _has_filter_intent(q: str, df: pd.DataFrame) -> bool:
+    """True when the question restricts which rows count: filter words,
+    dates, or any value that actually occurs in a text column ("overdue",
+    "south", "enterprise")."""
+    if _FILTER_WORDS.search(q):
+        return True
+    col_words = {str(c).lower() for c in df.columns}
+    q_words = set(re.findall(r"[a-z0-9][a-z0-9\-]*", q))
+    for col in df.columns:
+        series = df[col]
+        if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+            continue
+        values = series.dropna().astype(str)
+        if values.nunique() > 50:
+            continue  # free text / IDs — matching their words would be noise
+        for v in values.unique():
+            v_low = v.strip().lower()
+            if len(v_low) >= 3 and v_low not in col_words and (
+                v_low in q_words or (" " in v_low and v_low in q)
+            ):
+                return True
+    return False
+
+
+def describe_schema(df: pd.DataFrame, max_values: int = 15) -> str:
+    """Column list for the code-generation prompt, with enough about the
+    VALUES that generated filters match the data: the exact spellings in
+    low-cardinality text columns and the range of date columns.
+
+    Found by the held-out eval: with column names only, the model had to
+    guess whether a status was 'Pending' or 'pending'; a wrong guess made
+    filters match nothing ("0 pending invoices in South") and a median over
+    an empty filter came back as None.
+
+    Personal-looking columns (names, emails, phones...) get no values, value
+    text is PII-redacted, and the caller fences the block as untrusted data.
+    """
+    from pii_redaction import classify_column_name, personal_columns, redact_pii
+
+    # Stricter than the global classifier, because this lists actual VALUES:
+    # any column that is (or might be) a person's name is withheld unless
+    # its name says it names a thing (product_name, city_name, ...).
+    non_person = {"product", "item", "sku", "category", "city", "region", "state",
+                  "country", "company", "brand", "branch", "store", "team",
+                  "department", "dept", "plan", "file", "sheet", "project",
+                  "vendor", "supplier", "warehouse", "zone", "segment", "channel"}
+    personal = set(personal_columns(df.columns))
+    for col in df.columns:
+        toks = re.split(r"[^a-z0-9]+", str(col).lower())
+        maybe_person = classify_column_name(col) == "review" or (
+            toks and toks[-1] in ("name", "names") and not (set(toks[:-1]) & non_person)
+        )
+        if maybe_person:
+            personal.add(col)
+    lines = []
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            valid = s.dropna()
+            rng = f"dates from {valid.min():%Y-%m-%d} to {valid.max():%Y-%m-%d}" if len(valid) else "dates"
+            lines.append(f"- {col} (datetime): {rng}")
+        elif pd.api.types.is_bool_dtype(s):
+            lines.append(f"- {col} (true/false)")
+        elif pd.api.types.is_numeric_dtype(s):
+            lines.append(f"- {col} (number)")
+        else:
+            vals = s.dropna().astype(str)
+            if col in personal:
+                lines.append(f"- {col} (text, personal — values withheld)")
+            elif 0 < vals.nunique() <= max_values:
+                shown = ", ".join(repr(v) for v in sorted(vals.unique()))
+                lines.append(f"- {col} (text): exactly one of {redact_pii(shown)[0]}")
+            else:
+                lines.append(f"- {col} (text, {vals.nunique()} distinct values)")
+    return "\n".join(lines)
+
+
 def detect_shortcut(query: str, df: pd.DataFrame) -> str | None:
     q    = query.lower().strip()
     cols = df.columns.tolist()
@@ -57,14 +151,15 @@ def detect_shortcut(query: str, df: pd.DataFrame) -> str | None:
         r"compare|comparison|breakdown|group(?:ed)?|across|among|versus|vs)\b")
 
     def _is_whole_column_aggregate() -> bool:
-        if _GROUP_INTENT.search(q):
+        if _GROUP_INTENT.search(q) or _has_filter_intent(q, df):
             return False
         mentioned = [c for c in cols
                      if re.search(rf"\b{re.escape(str(c).lower())}s?\b", q)
                      or re.search(rf"\b{re.escape(str(c).lower().replace('_', ' '))}s?\b", q)]
         return len(mentioned) <= 1
 
-    if any(p in q for p in ["how many rows", "count rows", "number of rows", "row count"]):
+    if any(p in q for p in ["how many rows", "count rows", "number of rows", "row count"]) \
+            and not _has_filter_intent(q, df):
         return "result = len(df)"
     if any(p in q for p in ["how many columns", "count columns", "number of columns", "column count"]):
         return "result = len(df.columns)"
@@ -142,6 +237,11 @@ Available libraries (already imported, do NOT import anything):
 Rules:
 - Generate ONLY valid Python code. No explanations, no markdown, no imports.
 - CRITICAL: ONLY use column names from the exact list above.
+- CRITICAL: When filtering on a text column, use the value spellings listed
+  above EXACTLY (case included). If the question's wording differs from the
+  listed values ("refunds", "paid ones"), map it to the listed value or to a
+  numeric condition (e.g. refunds = negative amounts) rather than inventing
+  a new value.
 - CRITICAL: Before using a column verify it exists: if 'col_name' not in df.columns: raise ValueError('Column not found')
 - DO NOT use print() anywhere — it is not available in the sandbox.
 - IF calculating a number or table, assign it to a variable named 'result'.

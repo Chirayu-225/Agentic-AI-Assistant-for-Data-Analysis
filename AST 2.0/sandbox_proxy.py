@@ -30,6 +30,8 @@ WHAT THIS IS NOT
 from __future__ import annotations
 
 import pandas as pd
+import types as _types
+
 import numpy as np
 
 try:
@@ -130,6 +132,10 @@ INDEXER_ATTRS = {"loc", "iloc", "at", "iat"}
 ALLOWED_FRAME_ATTRS = {
     "columns", "dtypes", "shape", "index", "values", "empty", "T",
     "str", "dt", "cat",  # pandas accessor namespaces
+    # Read-only metadata the held-out eval showed real model output using
+    # (series.name after a groupby, uniqueness checks). Plain values, no I/O.
+    "name", "ndim", "is_unique", "hasnans", "dtype",
+    "is_monotonic_increasing", "is_monotonic_decreasing",
 }
 
 # Top-level pandas functions safe to call.
@@ -143,6 +149,7 @@ ALLOWED_PD_FUNCS = {
     "Period", "DateOffset", "Categorical", "CategoricalDtype", "Index",
     "DatetimeIndex", "MultiIndex", "IntervalIndex", "Interval", "interval_range",
     "wide_to_long", "pivot", "value_counts", "eval_placeholder_removed",
+    "api",  # only pd.api.types' dtype predicates — see NESTED_MODULE_ALLOWLISTS
 }
 ALLOWED_PD_FUNCS.discard("eval_placeholder_removed")
 
@@ -166,6 +173,24 @@ ALLOWED_NP_FUNCS = {
     "datetime64", "timedelta64", "bool_", "nanpercentile", "interp", "polyfit",
     "polyval", "cbrt", "square", "hypot", "radians", "degrees", "tanh",
     "empty", "full_like", "identity", "eye", "outer", "dot",
+    # Added after the held-out eval: column-type checks and the upper/lower
+    # triangle helpers used to de-duplicate a correlation matrix. Pure
+    # computation, no I/O.
+    "issubdtype", "number", "integer", "floating", "bool_", "object_",
+    "triu", "tril", "triu_indices", "tril_indices",
+}
+
+# Nested modules reachable through an allowlisted name, each with its own
+# allowlist. Anything not listed (pd.api.extensions, pd.io, np.lib, ...)
+# stays blocked. Only pandas' read-only dtype predicates are exposed.
+NESTED_MODULE_ALLOWLISTS = {
+    "pandas.api": {"types"},
+    "pandas.api.types": {
+        "is_numeric_dtype", "is_integer_dtype", "is_float_dtype", "is_bool_dtype",
+        "is_string_dtype", "is_object_dtype", "is_datetime64_any_dtype",
+        "is_datetime64_dtype", "is_timedelta64_dtype", "is_list_like",
+        "is_scalar", "is_number",
+    },
 }
 
 # matplotlib.pyplot functions safe to call.
@@ -473,6 +498,21 @@ class _ModuleProxy:
             )
 
         attr = getattr(mod, name)
+        if isinstance(attr, _types.ModuleType):
+            nested = NESTED_MODULE_ALLOWLISTS.get(attr.__name__)
+            if nested is None:
+                raise AttributeError(
+                    f"'{name}' is blocked in the sandbox for security "
+                    f"(only a fixed set of analysis/charting functions is available)"
+                )
+            return _ModuleProxy(attr, nested)
+        if isinstance(attr, type) and issubclass(attr, np.generic):
+            # numpy scalar types (np.number, np.float64, ...) are returned as
+            # the type itself so they work as dtype arguments, e.g.
+            # np.issubdtype(col.dtype, np.number) or astype(np.float64).
+            # Calling one still works too. Their dunder attributes stay
+            # unreachable: sandbox.py rejects any underscore attribute.
+            return attr
         if not callable(attr):
             return attr  # constants: np.nan, np.pi, pd.NaT, ...
 

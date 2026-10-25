@@ -3,6 +3,7 @@
 import { useState } from "react";
 import FileUpload, { UploadedFile } from "@/components/FileUpload";
 import { TableResult } from "@/components/ResultDisplay";
+import ShowWork from "@/components/ShowWork";
 import { getOrCreateSessionId } from "@/lib/sessionId";
 import type { MultiTableQueryResponse } from "@/lib/pythonClient";
 
@@ -156,6 +157,7 @@ export default function MultiTableTab() {
         <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
           <p className="font-mono text-xs text-red-400 mb-1">// QUERY ERROR</p>
           <p className="text-red-300 text-sm">{result.error ?? "Query failed."}</p>
+          <ShowWork code={result.code} language="sql" label="Query that failed" />
         </div>
       )}
 
@@ -168,6 +170,7 @@ export default function MultiTableTab() {
             {result.rowCount} ROW(S)
           </p>
           <TableResult data={result.resultData} />
+          <ShowWork code={result.code} language="sql" />
         </div>
       )}
     </div>

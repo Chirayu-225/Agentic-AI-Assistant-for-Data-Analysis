@@ -3,7 +3,7 @@ Functional proof for analysis_service.py.
 
 WHAT THIS CAN TEST HERE
     _json_safe_scalar, _dataframe_to_records, _shape_result,
-    _compute_confidence, _is_plotly_fig, _is_matplotlib_fig — none of
+    _describe_basis, _is_plotly_fig, _is_matplotlib_fig — none of
     these need query_engine.py or llm_provider.py, so they're fully
     testable without streamlit installed.
     Also: run_analysis()'s CSV-parse-failure path, which returns before
@@ -31,7 +31,7 @@ from analysis_service import (
     _json_safe_scalar,
     _dataframe_to_records,
     _shape_result,
-    _compute_confidence,
+    _describe_basis,
     _is_plotly_fig,
     _is_matplotlib_fig,
     run_analysis,
@@ -124,15 +124,16 @@ def main():
     print("[OK] matplotlib figure correctly returns an explicit 'not supported yet' error")
 
     print("\n" + "=" * 70)
-    print("PART 4 — confidence scoring")
+    print("PART 4 — answer basis (replaces confidence scoring)")
     print("=" * 70)
 
-    conf_high = _compute_confidence(df, success=True, shortcut_used=True)
-    conf_low = _compute_confidence(None, success=False, shortcut_used=False)
-    print(f"DataFrame + success + shortcut -> {conf_high} (expect HIGH)")
-    print(f"None + failure + no shortcut -> {conf_low} (expect LOW)")
-    assert conf_high == "HIGH" and conf_low == "LOW"
-    print("[OK] confidence scoring matches expected tiers")
+    basis = _describe_basis(df, "generated_python", len(df))
+    print(f"basis -> {basis}")
+    assert basis["method"] == "generated_python"
+    assert basis["rowsAnalyzed"] == len(df) and basis["resultRows"] == len(df)
+    assert "sandbox" in basis["basis"]
+    assert _describe_basis(5, "shortcut", 10)["resultRows"] is None
+    print("[OK] basis describes how the answer was computed, not a fake confidence tier")
 
     print("\n" + "=" * 70)
     print("PART 5 — run_analysis() error path (no streamlit needed)")

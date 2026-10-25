@@ -54,10 +54,10 @@ def index_document(file_bytes: bytes, filename: str, session_id: str) -> dict:
 def answer_question(doc_id: str, query: str, doc_name: str) -> dict:
     """RAG Q&A: retrieve relevant chunks, ask the LLM to answer from them."""
     try:
-        from rag_engine import rag_answer
+        from rag_engine import rag_answer_with_sources
 
-        answer = rag_answer(doc_id, query, doc_name)
-        return {"success": True, "answer": answer}
+        out = rag_answer_with_sources(doc_id, query, doc_name)
+        return {"success": True, "answer": out["answer"], "sources": out["sources"]}
     except KeyError:
         # get_collection() raises this when doc_id doesn't exist — most
         # often means the document needs re-indexing (e.g. server restarted

@@ -1,0 +1,402 @@
+invoice_id,invoice_date,region,segment,status,amount,discount_pct,days_to_pay
+50001,2026/02/02,South,SMB,Paid,"₹7,132.22",0%,35
+50002,2026-01-29,North,Enterprise,Paid,"₹33,078.22",10%,87
+50003,25 Apr 2026,South,SMB,Paid,"₹9,649.16",5%,46
+50004,2026/01/26,north,Enterprise,Pending,"Rs. 118,540.24",0%,
+50005,2026/04/23,South,SMB,Paid,"Rs. 16,140.94",5%,78
+50006,2026-02-26,North,mid-market,Paid,"₹17,329.12",0%,40
+50007,26 Apr 2026,South,Enterprise,Paid,50522.91,5%,19
+50008,2026-05-02,South,S.M.B.,Paid,"₹9,762.92",0%,38
+50009,25 Feb 2026,South,Enterprise,Paid,67349.97,0%,34
+50010,2026/01/15,North,SMB,Paid,"₹12,858.96",0%,20
+50011,2026/06/19,North,SMB,Paid,"₹8,737.35",0%,55
+50012,10 Apr 2026,West,Enterprise,Overdue,"₹56,449.21",0%,
+50013,2026/01/10,east,SMB,Overdue,9318.67,5%,
+50014,2026/02/28,East,Mid-Market,Paid,"₹26,835.27",10%,60
+50015,2026-02-19,North,SMB,Paid,"Rs. 10,261.93",5%,10
+50016,2026/04/09,South,Enterprise,Paid,172934.32,15%,9
+50017,16 Apr 2026,East,Mid-Market,Paid,"Rs. 37,402.93",10%,50
+50018,2026/05/24,North,SMB,Paid,"₹4,412.19",5%,59
+50019,2026/06/28,South,Mid-Market,Paid,"₹46,613.84",0%,71
+50020,2026-04-26,South,smb,Paid,19863.95,0%,62
+50021,15 May 2026,South,SMB,Paid,"Rs. 8,067.44",5%,72
+50022,2026/06/08,South,Enterprise,Paid,130332.23,10%,21
+50023,2026/01/12,East,SMB,Overdue,3092.22,0%,
+50024,2026/01/07,West,S.M.B.,Paid,"Rs. 20,454.38",5%,36
+50025,2026/04/24,North,Mid Market,Paid,"Rs. 11,701.50",10%,17
+50026,15 Jun 2026,West,SMB,Pending,6840.92,5%,
+50027,2026-06-18,West,smb,Paid,"Rs. 5,603.67",0%,15
+50028,2026-01-21,N.,mid-market,Paid,40956.13,10%,41
+50029,31 Jan 2026,east,Enterprise,Paid,59337.83,0%,17
+50030,2026-03-18,South,SMB,Paid,10350.20,10%,32
+50031,2026/02/11,South,SMB,Paid,"₹7,516.67",0%,77
+50032,20 Jun 2026,East,Mid-Market,Paid,6555.31,5%,6
+50033,2026-04-13,East,Enterprise,Overdue,88665.23,0%,
+50034,28 Feb 2026,North,Enterprise,Paid,"Rs. 51,326.44",0%,48
+50035,2026/05/09,North,Enterprise,Paid,103541.74,10%,58
+50036,11 Jun 2026,South,Enterprise,Pending,"Rs. 42,029.55",15%,
+50037,2026-05-31,East,Mid-Market,Pending,61637.61,0%,
+50038,2026/06/03,East,Mid Market,Paid,43480.90,10%,23
+50039,2026-04-10,South,Mid-Market,Paid,"₹29,522.75",0%,14
+50040,30 Apr 2026,EAST,SMB,Overdue,"₹4,105.95",5%,
+50041,2026/05/13,West,SMB,Overdue,"Rs. 3,082.11",15%,
+50042,07 Feb 2026,N.,Enterprise,Paid,34506.01,0%,42
+50043,2026/03/05,South,SMB,Paid,"₹7,907.28",5%,13
+50044,2026/06/25,North,Enterprise,Paid,157709.12,5%,12
+50045,2026/04/14,NORTH ,SMB,Pending,"₹23,838.99",0%,
+50046,2026-01-22,NORTH ,Mid Market,Overdue,24207.27,0%,
+50047,2026/04/30,West,Mid-Market,Overdue,"Rs. 24,783.51",15%,
+50048,2026/04/02,North,Enterprise,Paid,"Rs. 151,447.08",0%,40
+50049,02 Feb 2026,East,SMB,Overdue,"₹21,246.71",0%,
+50050,2026-04-29,West,mid-market,Paid,"Rs. 28,714.51",15%,60
+50051,2026/01/16,South,Enterprise,Overdue,"Rs. 122,471.64",0%,
+50052,30 Mar 2026,South,SMB,Paid,"₹9,243.16",0%,66
+50053,2026-01-12,West,Mid-Market,Paid,"Rs. 37,132.72",15%,80
+50054,2026-04-29,East,SMB,Overdue,8343.49,0%,
+50055,14 May 2026,East,Enterprise,Paid,"Rs. 60,884.28",0%,80
+50056,2026/02/25,North,Mid-Market,Paid,28659.36,5%,14
+50057,2026-04-17,South,Enterprise,Overdue,"₹120,350.27",0%,
+50058,2026-04-19,North,SMB,Paid,"Rs. 10,079.22",10%,76
+50059,2026/03/25,North,SMB,Paid,"₹17,820.21",0%,23
+50060,18 Jun 2026,East,Enterprise,Paid,"Rs. 129,989.47",5%,27
+50061,2026/02/11,South,Mid-Market,Paid,25711.29,0%,67
+50062,16 Feb 2026,East,Enterprise,Paid,105435.71,0%,77
+50063,06 Feb 2026,East,Enterprise,Overdue,"₹46,429.24",15%,
+50064,2026-03-22,North,SMB,Pending,"Rs. 7,657.75",0%,
+50065,2026-02-15,South,Enterprise,Paid,"Rs. 105,298.55",15%,45
+50066,2026-01-28,North,smb,Paid,12486.10,5%,83
+50067,2026/02/05,North,SMB,Paid,"Rs. 10,409.49",0%,6
+50068,2026-04-21,EAST,Enterprise,Paid,105762.13,5%,6
+50069,2026-03-03,North,mid-market,Overdue,"₹34,518.09",10%,
+50070,04 Jun 2026,East,SMB,Pending,"₹3,330.91",0%,
+50071,2026-05-21,West,Enterprise,Pending,"₹41,511.32",5%,
+50072,25 Apr 2026,West,mid-market,Paid,"₹63,447.05",15%,32
+50073,2026-03-31,West,Enterprise,Paid,48576.83,15%,43
+50074,2026-01-03,East,Mid-Market,Paid,"₹51,447.45",0%,29
+50075,2026/01/10,North,Mid Market,Paid,"Rs. 40,404.19",0%,12
+50076,2026/06/14,East,Enterprise,Paid,"₹123,319.38",15%,59
+50077,2026/02/14,South,SMB,Pending,"Rs. 3,306.61",0%,
+50078,12 May 2026,East,Mid-Market,Overdue,"Rs. 19,174.62",0%,
+50079,15 Apr 2026,North,SMB,Paid,"₹4,891.74",0%,32
+50080,17 Apr 2026,West,Mid-Market,Paid,"Rs. 70,994.30",0%,37
+50081,2026-06-23,South,Mid-Market,Paid,14439.77,0%,87
+50082,2026-05-26, South,Enterprise,Pending,"Rs. 36,434.75",0%,
+50083,2026-06-08,east,SMB,Pending,"₹4,444.04",5%,
+50084,2026/03/20,East,Mid-Market,Paid,"Rs. 78,650.16",15%,14
+50085,2026-05-29,West,Mid-Market,Paid,"Rs. 12,579.21",0%,74
+50086,2026/01/25,North,Mid-Market,Paid,"Rs. 18,006.79",0%,50
+50087,2026/06/11,North,Mid-Market,Pending,"₹56,567.85",0%,
+50088,2026/03/24,N.,SMB,Paid,5021.03,5%,6
+50089,2026/04/15,South,SMB,Paid,"₹8,875.02",15%,39
+50090,2026-04-17,W.,SMB,Overdue,11707.35,5%,
+50091,2026-05-05,North,SMB,Paid,"Rs. 22,639.68",0%,58
+50092,2026-03-23,South,SMB,Paid,"₹4,542.34",10%,39
+50093,2026-05-12,West,SMB,Paid,"₹4,213.58",5%,80
+50094,2026-06-04,North,Mid Market,Paid,"Rs. 51,544.08",0%,20
+50095,2026-05-10,North,SMB,Paid,"₹13,517.60",5%,89
+50096,21 Mar 2026,North,Enterprise,Pending,"Rs. 82,269.62",0%,
+50097,05 Mar 2026,West,Enterprise,Overdue,"₹112,452.84",5%,
+50098,2026/01/04,South,SMB,Paid,"₹11,771.28",0%,44
+50099,06 Apr 2026,South,SMB,Overdue,"₹5,354.59",5%,
+50100,06 Jun 2026,South,SMB,Paid,"Rs. 9,943.58",0%,70
+50101,21 Jun 2026,North,SMB,Paid,"₹9,133.52",10%,88
+50102,2026-02-17,South,Mid-Market,Overdue,"₹62,776.42",0%,
+50103,18 Jun 2026,North,Mid-Market,Paid,"Rs. 67,621.57",0%,40
+50104,23 Mar 2026,north,Mid-Market,Paid,"₹22,073.02",10%,39
+50105,2026-01-06,South,Mid-Market,Pending,21153.65,0%,
+50106,2026-06-16,North,Mid-Market,Paid,"₹28,957.86",0%,25
+50107,2026-03-02,East,Mid-Market,Paid,"₹36,082.31",0%,87
+50108,2026/01/17,East,Enterprise,Paid,"₹91,738.09",0%,16
+50109,2026/06/28,West,Enterprise,Pending,"₹108,730.11",0%,
+50110,07 Jun 2026,North,Mid-Market,Paid,"₹25,103.63",0%,38
+50111,2026-04-13,North,S.M.B.,Paid,"Rs. 16,181.92",5%,41
+50112,2026/02/03,east,SMB,Paid,8724.25,10%,19
+50113,03 Mar 2026,South,Enterprise,Paid,"₹40,022.25",5%,71
+50114,2026-06-09,South,Enterprise,Paid,"₹75,440.62",15%,19
+50115,2026-03-19,East,smb,Paid,16196.72,5%,45
+50116,2026-06-11,NORTH ,Enterprise,Pending,34676.13,0%,
+50117,2026/05/28,East,Mid-Market,Overdue,"₹17,049.69",0%,
+50118,2026/05/15,South,Mid-Market,Paid,"Rs. 45,581.98",0%,10
+50119,2026-04-24,West,Enterprise,Paid,"₹120,452.21",5%,18
+50120,2026-03-30,north,SMB,Paid,7910.46,0%,8
+50121,2026-04-20,South,Enterprise,Pending,"Rs. 106,072.29",0%,
+50122,18 Mar 2026, South,Mid-Market,Paid,"Rs. 37,391.76",10%,56
+50123,2026/03/12,North,smb,Paid,"Rs. 15,130.21",0%,9
+50124,2026/03/29,East,Mid Market,Paid,"Rs. 43,865.23",0%,48
+50125,2026/01/10,North,SMB,Paid,11720.34,15%,9
+50126,30 Jan 2026,West,SMB,Overdue,3937.44,10%,
+50127,2026/05/04,North,SMB,Overdue,"₹6,767.78",15%,
+50128,2026/02/10,North,SMB,Paid,6527.60,0%,12
+50129,2026-03-10,North,SMB,Paid,9955.82,0%,35
+50130,2026/04/05,South,SMB,Paid,"Rs. 4,028.60",0%,11
+50131,21 Mar 2026,West,SMB,Paid,"₹2,939.86",5%,49
+50132,2026/05/19,East,SMB,Paid,9695.51,5%,84
+50133,2026-06-06,South,SMB,Paid,"₹4,630.99",15%,10
+50134,2026/06/11,West,Enterprise,Paid,"Rs. 77,206.51",0%,60
+50135,14 Jun 2026,East,SMB,Paid,8628.03,5%,34
+50136,03 Apr 2026,North,Enterprise,Paid,"₹104,037.65",0%,18
+50137,16 Mar 2026,South,Mid-Market,Paid,"Rs. 40,555.96",5%,47
+50138,2026/05/21,East,SMB,Paid,6997.33,0%,28
+50139,2026-02-11,West,SMB,Paid,"Rs. 10,862.41",0%,21
+50140,2026/01/04,EAST,SMB,Paid,16131.45,10%,47
+50141,2026-06-14,West,SMB,Paid,"₹5,305.89",15%,23
+50142,2026-03-02,South,Enterprise,Paid,81492.73,5%,7
+50143,2026/03/15,east,Mid-Market,Paid,"₹9,729.84",0%,58
+50144,2026-04-15,North,Mid-Market,Paid,29894.81,10%,79
+50145,25 Feb 2026,South,Enterprise,Paid,61104.21,0%,25
+50146,2026/05/09,South,mid-market,Pending,"₹13,143.93",5%,
+50147,23 Mar 2026,North,SMB,Paid,8014.66,5%,8
+50148,2026/02/10,South,SMB,Pending,"Rs. 10,065.91",0%,
+50149,17 Jun 2026,East,SMB,Overdue,"₹6,132.62",5%,
+50150,01 Mar 2026,South,SMB,Pending,"₹9,538.08",5%,
+50151,2026-02-21,North,mid-market,Overdue,"₹34,440.63",0%,
+50152,2026-06-11,West,Mid Market,Pending,41624.61,5%,
+50153,2026-01-30,South,Mid-Market,Paid,"Rs. 59,503.57",5%,82
+50154,2026-04-29,south,SMB,Overdue,"₹9,423.84",0%,
+50155,05 Jun 2026,North,Mid-Market,Overdue,40426.63,0%,
+50156,07 Apr 2026,West,S.M.B.,Paid,"₹14,472.80",0%,55
+50157,24 Feb 2026,west ,Enterprise,Paid,"₹41,156.60",5%,71
+50158,2026-01-30,West,SMB,Overdue,24183.39,15%,
+50159,07 Jun 2026,west ,SMB,Paid,5129.30,5%,36
+50160,2026/05/28,W.,SMB,Paid,"Rs. 9,974.77",0%,72
+50161,2026-06-14,North,Enterprise,Overdue,168021.85,0%,
+50162,2026/01/26,North,smb,Paid,"Rs. 2,779.95",10%,63
+50163,21 May 2026,North,S.M.B.,Paid,"₹15,485.09",5%,27
+50164,2026/05/13,South,Enterprise,Paid,55485.06,0%,24
+50165,31 Mar 2026,north,SMB,Paid,"Rs. 18,789.85",5%,55
+50166,2026-01-29,North,Mid Market,Paid,12613.55,0%,57
+50167,01 May 2026,North,Mid Market,Paid,53731.67,5%,76
+50168,25 Feb 2026,East,Enterprise,Paid,70668.40,0%,22
+50169,2026-02-18,North,Mid-Market,Paid,40765.02,5%,81
+50170,25 Feb 2026,North,SMB,Pending,"₹13,924.24",0%,
+50171,2026/04/10,N.,Mid-Market,Paid,66852.25,0%,10
+50172,23 Apr 2026,North,S.M.B.,Pending,"Rs. 9,876.87",5%,
+50173,2026/01/15,East,SMB,Paid,"₹7,782.36",0%,84
+50174,2026-04-01,West,Mid Market,Paid,"Rs. 23,454.77",0%,15
+50175,23 Feb 2026,east,SMB,Paid,10458.52,10%,70
+50176,2026/01/22,North,Mid-Market,Paid,46930.56,5%,74
+50177,2026-03-18,North,SMB,Paid,"Rs. 13,832.19",0%,55
+50178,2026/02/26,North,SMB,Paid,"Rs. 17,883.44",0%,30
+50179,2026/03/25,South,Enterprise,Pending,"Rs. 42,540.27",0%,
+50180,14 Apr 2026,North,Enterprise,Paid,"Rs. 81,077.05",10%,6
+50181,04 Feb 2026,South,Mid Market,Pending,"₹32,998.91",10%,
+50182,2026/05/03,East,Enterprise,Paid,22468.94,10%,27
+50183,27 Jun 2026,North,Mid-Market,Paid,28836.78,10%,25
+50184,22 Jan 2026,EAST,S.M.B.,Paid,10036.49,15%,73
+50185,14 Mar 2026,South,Mid-Market,Paid,"Rs. 10,784.58",5%,20
+50186,25 Jan 2026,South,SMB,Paid,15000.63,0%,5
+50187,2026/06/17,South,Mid-Market,Paid,40861.13,15%,14
+50188,2026/04/02,East,Mid-Market,Paid,27010.07,0%,29
+50189,2026/02/15,EAST,Mid Market,Pending,"₹33,996.24",0%,
+50190,2026/06/09,South,Mid-Market,Paid,"Rs. 12,387.24",0%,81
+50191,2026-04-07,East,SMB,Overdue,"Rs. 10,918.02",5%,
+50192,05 Feb 2026,South,SMB,Paid,5553.75,5%,36
+50193,2026/02/09,North,Mid Market,Paid,"Rs. 39,652.46",15%,59
+50194,2026-01-19,south,Mid-Market,Pending,"Rs. 26,017.44",0%,
+50195,2026-03-29,South,Mid-Market,Pending,"₹19,894.27",0%,
+50196,2026/01/24,West,Enterprise,Paid,"₹96,381.60",0%,76
+50197,05 Jun 2026, South,SMB,Paid,"₹7,850.31",0%,21
+50198,2026/04/20,north,Mid-Market,Overdue,"₹89,889.27",15%,
+50199,2026-04-29,south,SMB,Paid,11674.70,0%,54
+50200,2026-06-17,East,Enterprise,Paid,"₹50,045.15",5%,38
+50201,14 Jan 2026,West,smb,Paid,"₹9,732.75",5%,18
+50202,11 Apr 2026,W.,Mid-Market,Paid,"₹20,810.27",0%,54
+50203,2026/06/25,South,SMB,Paid,7586.14,15%,86
+50204,2026-02-12,North,SMB,Paid,"Rs. 11,894.42",5%,41
+50205,2026-03-30,North,SMB,Paid,9164.51,0%,77
+50206,12 Feb 2026,East,Mid-Market,Paid,"₹44,869.64",0%,46
+50207,10 Feb 2026,North,Mid Market,Overdue,17059.25,0%,
+50208,2026-05-04,South,Mid-Market,Paid,21348.01,5%,60
+50209,06 Jun 2026,east,Enterprise,Paid,18738.43,0%,51
+50210,2026-05-29,West,Mid-Market,Pending,"₹68,976.25",5%,
+50211,2026-05-22,South,Enterprise,Paid,"Rs. 55,413.39",0%,65
+50212,2026-02-18,North,Enterprise,Paid,139321.49,5%,21
+50213,2026/01/12,north,SMB,Paid,6756.70,5%,70
+50214,20 Feb 2026,south,Mid-Market,Overdue,24270.54,0%,
+50215,2026/05/31, South,SMB,Paid,26487.56,5%,38
+50216,2026-01-06,South,smb,Paid,14486.28,0%,9
+50217,2026/06/16,North,Enterprise,Paid,"₹55,494.68",10%,34
+50218,2026/05/08,west ,mid-market,Overdue,26674.67,0%,
+50219,12 Jan 2026,South,Enterprise,Paid,43562.99,0%,55
+50220,2026/02/23,South,Mid Market,Paid,"₹23,286.66",0%,26
+50221,25 Apr 2026,South,Mid-Market,Paid,"₹13,086.39",15%,16
+50222,13 Jan 2026,North,Mid-Market,Paid,"Rs. 18,468.34",0%,16
+50223,2026-04-21,South,SMB,Overdue,"₹5,090.46",5%,
+50224,23 Jan 2026,North,Enterprise,Overdue,"Rs. 79,577.25",0%,
+50225,2026/03/20,East,SMB,Paid,"Rs. 8,560.34",10%,88
+50226,2026-03-23,NORTH ,Enterprise,Overdue,"Rs. 24,726.20",15%,
+50227,2026-05-09,North,Mid Market,Paid,"Rs. 34,190.50",0%,13
+50228,2026/06/04,North,SMB,Paid,"₹9,974.53",5%,20
+50229,2026/01/12,North,mid-market,Paid,37617.02,0%,74
+50230,2026/05/28,South,S.M.B.,Overdue,"₹21,520.95",0%,
+50231,2026/04/21,South,SMB,Paid,"₹6,285.13",5%,56
+50232,2026-05-19,north,Mid-Market,Paid,"₹34,387.07",15%,61
+50233,30 Jun 2026,North,Mid-Market,Overdue,"₹25,599.93",0%,
+50234,2026-04-19,South,SMB,Paid,"Rs. 11,478.49",0%,32
+50235,2026-03-23,West,SMB,Paid,"Rs. 3,949.29",5%,70
+50236,2026/03/05,NORTH ,SMB,Overdue,"Rs. 6,965.57",5%,
+50237,2026-05-20,North,SMB,Paid,"₹17,939.38",0%,63
+50238,2026-01-12,west ,Mid-Market,Paid,"₹24,242.22",15%,43
+50239,2026/06/25,South,Mid-Market,Paid,"₹24,132.84",10%,23
+50240,02 Mar 2026,West,SMB,Overdue,"Rs. 13,299.11",10%,
+50241,2026-02-12,West,SMB,Paid,9234.73,10%,72
+50242,2026-02-11,South,Mid-Market,Paid,"₹58,478.44",0%,16
+50243,2026/03/19,North,SMB,Paid,6369.01,0%,7
+50244,25 May 2026,W.,Enterprise,Paid,"Rs. 88,490.39",0%,87
+50245,2026-01-21,North,SMB,Paid,"Rs. 10,647.60",0%,35
+50246,2026-04-10,North,Mid-Market,Paid,"₹22,009.69",10%,68
+50247,15 Mar 2026,South,SMB,Paid,7281.39,5%,33
+50248,2026/01/06,North,Mid Market,Pending,"₹66,849.64",15%,
+50249,2026/03/07,South,SMB,Paid,"₹14,381.09",0%,71
+50250,25 Mar 2026,North,Enterprise,Paid,"₹32,829.15",0%,12
+50251,2026-01-10,East,SMB,Paid,9781.73,15%,85
+50252,2026-01-06,North,Enterprise,Pending,44715.25,0%,
+50253,2026-01-22,West,Mid-Market,Paid,35669.83,5%,20
+50254,2026-01-22,South,Mid-Market,Paid,"₹28,820.80",5%,25
+50255,19 Jan 2026,North,Mid-Market,Pending,12561.33,0%,
+50256,01 Apr 2026,north,Enterprise,Overdue,209067.58,15%,
+50257,2026-06-08,South,Enterprise,Paid,"Rs. 70,316.90",0%,7
+50258,13 Feb 2026,North,Mid-Market,Paid,"Rs. 26,250.17",0%,65
+50259,2026/05/28,South,mid-market,Paid,"₹25,176.10",0%,49
+50260,2026/01/08,West,Mid-Market,Pending,"Rs. 30,060.82",5%,
+50261,17 Feb 2026,West,SMB,Paid,"₹8,648.57",0%,48
+50262,2026/04/18,West,SMB,Pending,"Rs. 4,180.45",0%,
+50263,2026-02-12,South,Enterprise,Paid,"Rs. 52,700.05",0%,31
+50264,2026/03/01,South,Mid-Market,Overdue,32193.33,5%,
+50265,16 Apr 2026,South,Mid-Market,Paid,"₹17,128.63",15%,44
+50266,02 Apr 2026,East,SMB,Paid,5271.04,0%,17
+50267,13 May 2026,East,Enterprise,Paid,"₹33,702.74",10%,29
+50268,2026/05/28,West,Mid-Market,Paid,"₹20,431.37",0%,26
+50269,03 Jun 2026,West,SMB,Paid,"Rs. 4,582.96",0%,57
+50270,2026-01-20,South,SMB,Paid,9814.60,0%,10
+50271,19 Jun 2026,West,mid-market,Paid,"₹45,689.20",5%,59
+50272,21 Mar 2026,North,Mid-Market,Paid,41953.90,15%,14
+50273,08 Apr 2026,West,SMB,Paid,15795.26,0%,44
+50274,2026-03-13,south,mid-market,Paid,"Rs. 34,886.68",5%,53
+50275,2026/01/19,North,Mid-Market,Overdue,13856.18,10%,
+50276,31 May 2026,North,mid-market,Pending,"Rs. 38,634.37",10%,
+50277,2026/01/27, South,Mid Market,Paid,"Rs. 15,885.80",0%,22
+50278,10 Jun 2026, South,Mid-Market,Paid,55140.28,5%,29
+50279,2026/03/09,West,SMB,Pending,5939.07,5%,
+50280,2026-03-29,North,Mid-Market,Paid,"₹86,541.87",0%,28
+50281,2026/03/12,west ,SMB,Paid,"Rs. 4,771.28",5%,16
+50282,2026-05-23,W.,Mid-Market,Paid,"₹52,904.82",0%,25
+50283,2026-05-15,South,smb,Pending,"₹7,542.71",0%,
+50284,07 Jan 2026,East,SMB,Paid,5797.59,10%,37
+50285,2026/02/01,south,SMB,Paid,"Rs. 15,594.81",5%,62
+50286,03 Jun 2026,South,Enterprise,Overdue,94827.10,0%,
+50287,2026/04/15,South,SMB,Paid,10733.24,10%,52
+50288,2026-03-07,East,SMB,Paid,"Rs. 9,031.45",5%,81
+50289,08 May 2026,north,Mid-Market,Paid,"Rs. 26,717.31",15%,33
+50290,2026/04/28,North,SMB,Paid,"₹8,182.93",15%,5
+50291,2026/01/20, South,SMB,Paid,"Rs. 11,378.44",0%,69
+50292,2026/06/19,NORTH ,SMB,Overdue,"₹9,680.52",0%,
+50293,2026-02-09,South,Mid-Market,Paid,"₹17,976.41",0%,9
+50294,2026/01/30,South,Mid-Market,Paid,29694.44,0%,66
+50295,2026/03/26,NORTH ,Mid-Market,Paid,"₹11,929.04",10%,71
+50296,2026/05/13,North,SMB,Paid,"Rs. 15,843.57",0%,43
+50297,2026/04/05,South,SMB,Paid,"Rs. 10,282.98",5%,62
+50298,2026-02-15, South,Mid-Market,Paid,"₹63,303.44",0%,35
+50299,2026/04/28,South,Mid-Market,Paid,"Rs. 21,383.73",10%,71
+50300,2026-05-12,east,SMB,Paid,"Rs. 7,500.10",0%,56
+50301,11 Jan 2026,South,Enterprise,Pending,"Rs. 129,418.44",10%,
+50302,2026-03-25,North,SMB,Paid,"₹11,055.00",0%,86
+50303,2026-06-29,South,SMB,Paid,4841.84,10%,68
+50304,15 Jan 2026,East,Mid Market,Overdue,"₹26,241.23",0%,
+50305,12 Feb 2026,South,SMB,Pending,13038.90,0%,
+50306,2026/03/15,South,Mid-Market,Overdue,"₹24,554.51",5%,
+50307,19 Jun 2026,EAST,Enterprise,Paid,111827.55,5%,50
+50308,2026-02-25,north,Mid-Market,Paid,"Rs. 34,797.63",15%,22
+50309,2026-05-22,W.,SMB,Paid,"₹18,903.87",0%,85
+50310,2026-06-25,West,Enterprise,Paid,"Rs. 67,478.69",5%,78
+50311,2026/04/10,North,Mid-Market,Paid,"₹26,200.52",0%,63
+50312,2026/06/01,South,Mid-Market,Pending,"₹12,920.74",0%,
+50313,2026-02-19,west ,SMB,Paid,"₹6,721.63",0%,28
+50314,2026-05-10,South,SMB,Pending,"Rs. 2,732.26",5%,
+50315,2026/05/08,North,Mid-Market,Overdue,23561.53,5%,
+50316,2026-02-03,East,Enterprise,Paid,"Rs. 48,617.11",0%,15
+50317,2026/01/24,North,SMB,Overdue,6899.26,10%,
+50318,02 Apr 2026,North,Mid-Market,Paid,44827.58,0%,54
+50319,2026-03-20,South,mid-market,Paid,"₹44,099.79",5%,84
+50320,2026-01-20,South,Mid-Market,Paid,"Rs. 33,416.89",0%,50
+50321,2026/06/06,East,Enterprise,Overdue,"₹74,133.15",5%,
+50322,2026-05-14,East,SMB,Pending,"Rs. 7,093.97",0%,
+50323,2026-02-28,South,Mid-Market,Paid,"Rs. 15,332.59",10%,63
+50324,05 Mar 2026,North,SMB,Paid,"₹7,602.76",0%,13
+50325,10 Feb 2026,North,Mid-Market,Pending,"₹23,500.70",0%,
+50326,2026/03/19,South,S.M.B.,Paid,4163.39,5%,35
+50327,2026-02-07,South,SMB,Pending,8430.21,0%,
+50328,2026-05-06,North,Mid-Market,Paid,"₹28,228.60",0%,77
+50329,2026/04/22,East,SMB,Paid,"Rs. 8,773.84",0%,10
+50330,05 Feb 2026, South,Mid-Market,Overdue,40708.62,0%,
+50331,2026/06/16,East,SMB,Paid,"Rs. 22,627.08",0%,25
+50332,15 Feb 2026,South,Mid-Market,Paid,"Rs. 28,262.43",0%,52
+50333,2026/03/16,South,SMB,Paid,13450.39,0%,5
+50334,2026/02/14,south,SMB,Paid,"Rs. 9,484.88",0%,89
+50335,28 Apr 2026,East,Mid-Market,Paid,18009.12,0%,89
+50336,16 Jan 2026, South,Mid-Market,Paid,"Rs. 38,638.75",5%,36
+50337,18 Jan 2026,North,smb,Paid,23846.21,5%,10
+50338,2026/06/28,West,SMB,Overdue,"Rs. 6,616.52",0%,
+50339,2026-05-25,West,SMB,Paid,"₹12,233.26",0%,9
+50340,2026-04-07,North,Mid-Market,Pending,"Rs. 20,894.30",5%,
+50341,2026-03-21,East,Enterprise,Paid,"Rs. 133,830.91",0%,79
+50342,2026/04/29,EAST,SMB,Pending,"₹6,059.88",0%,
+50343,2026-05-21,North,SMB,Pending,"Rs. 15,318.08",15%,
+50344,2026/03/17,NORTH ,SMB,Paid,"₹10,453.46",0%,72
+50345,2026/05/12,West,SMB,Paid,"Rs. 14,395.82",0%,59
+50346,2026/06/04,West,SMB,Paid,14829.87,0%,42
+50347,2026-04-14,South,SMB,Paid,"₹10,642.40",5%,49
+50348,16 Feb 2026,South,SMB,Paid,13387.17,0%,84
+50349,2026-05-22,South,SMB,Overdue,"₹3,721.85",0%,
+50350,2026-06-11,North,Enterprise,Paid,"₹198,710.84",10%,27
+50351,15 Mar 2026,East,Enterprise,Paid,"₹67,901.57",0%,66
+50352,2026-06-01,North,Enterprise,Paid,"Rs. 190,804.12",0%,81
+50353,2026-05-15,South,Mid Market,Paid,"₹43,004.57",0%,81
+50354,2026-06-05,North,Mid Market,Overdue,"₹35,547.66",0%,
+50355,25 Apr 2026,south,Enterprise,Overdue,141814.92,0%,
+50356,2026/05/02,W.,Enterprise,Paid,47568.62,0%,23
+50357,22 Jun 2026,East,SMB,Paid,16007.29,0%,57
+50358,12 Feb 2026,East,S.M.B.,Paid,"₹8,668.19",5%,29
+50359,2026-06-27,EAST,SMB,Overdue,"₹14,491.73",5%,
+50360,2026-03-20,North,smb,Paid,"Rs. 14,883.04",10%,81
+50361,2026/01/21,North,mid-market,Paid,"₹21,559.17",15%,48
+50362,2026-05-26,north,Mid-Market,Paid,"₹15,315.50",5%,61
+50363,2026/03/25,North,SMB,Paid,"₹24,264.60",0%,75
+50364,2026/05/27,W.,smb,Paid,3796.83,0%,87
+50365,2026/05/24,East,SMB,Paid,"₹12,935.90",0%,85
+50366,2026/03/23,East,SMB,Paid,9129.70,10%,63
+50367,2026-04-27,East,Mid-Market,Paid,"Rs. 19,815.94",5%,59
+50368,2026/06/22,South,SMB,Paid,"₹13,968.39",0%,63
+50369,2026/01/29, South,SMB,Paid,10427.74,0%,20
+50370,2026/05/24,north,S.M.B.,Paid,6846.18,0%,33
+50371,2026/01/18,South,SMB,Pending,6990.14,0%,
+50372,2026/03/20,South,Enterprise,Paid,32813.65,0%,27
+50373,23 May 2026,North,Mid-Market,Paid,"Rs. 77,665.39",0%,12
+50374,2026/05/11,West,Mid-Market,Overdue,8379.75,5%,
+50375,10 Feb 2026,East,Enterprise,Paid,135912.71,0%,13
+50376,03 Feb 2026,North,Enterprise,Paid,"₹164,915.92",0%,18
+50377,2026/03/02,East,Enterprise,Paid,55590.85,0%,77
+50378,2026/04/13,West,Mid-Market,Paid,"Rs. 73,323.57",0%,35
+50379,2026/06/15,North,S.M.B.,Overdue,8529.25,0%,
+50380,17 Jun 2026,South,Mid-Market,Paid,"Rs. 39,652.38",0%,85
+50381,2026/04/22,West,Mid Market,Paid,"₹25,974.95",0%,52
+50382,2026/05/15,South,Mid-Market,Paid,37238.34,5%,60
+50383,2026-01-13,East,Mid-Market,Overdue,"₹23,690.39",0%,
+50384,12 Jan 2026,East,Enterprise,Paid,"₹125,550.94",5%,67
+50385,25 May 2026,North,SMB,Overdue,9620.68,10%,
+50386,16 Feb 2026,East,SMB,Paid,"Rs. 12,014.64",0%,24
+50387,2026-01-26,South,Enterprise,Paid,133365.46,5%,67
+50388,2026-06-24,East,SMB,Overdue,4359.60,0%,
+50389,2026/05/08, South,Mid-Market,Paid,55011.26,5%,17
+50390,04 Mar 2026,East,SMB,Paid,"Rs. 7,038.18",5%,57
+50391,09 May 2026, South,mid-market,Paid,"Rs. 77,146.34",0%,39
+50392,12 May 2026,North,Mid-Market,Overdue,"Rs. 21,625.50",0%,
+50393,2026/04/21,north,Enterprise,Paid,"₹141,708.01",5%,50
+50394,22 Mar 2026,South,Mid-Market,Paid,"₹18,624.38",0%,46
+50395,2026-02-16,South,SMB,Overdue,"₹6,398.24",10%,
+50396,2026/04/02,South,SMB,Paid,"Rs. 8,983.77",0%,13
+50397,28 Jan 2026,South,SMB,Overdue,"₹6,897.63",0%,
+50398,13 Feb 2026,East,mid-market,Paid,65438.85,10%,36
+50399,2026-04-06,South,S.M.B.,Overdue,"₹10,241.03",15%,
+50400,2026/01/30,north,Mid-Market,Paid,"₹10,499.05",0%,26
+TOTAL,,,,,"₹13,748,034.32",,

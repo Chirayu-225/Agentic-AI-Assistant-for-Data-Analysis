@@ -5,7 +5,7 @@ import { UploadedFile } from "@/components/FileUpload";
 import RagQueryPanel from "@/components/RagQueryPanel";
 import RagResultDisplay from "@/components/RagResultDisplay";
 import { getOrCreateSessionId } from "@/lib/sessionId";
-import type { RagIndexResponse, RagQueryResponse, RagInsightsResponse, ExtractedTable } from "@/lib/pythonClient";
+import type { RagIndexResponse, RagQueryResponse, RagInsightsResponse, ExtractedTable, RagSource } from "@/lib/pythonClient";
 
 type IndexState =
   | { status: "idle" }
@@ -14,7 +14,7 @@ type IndexState =
   | { status: "error"; message: string };
 
 type ResultState =
-  | { kind: "answer"; text?: string; error?: string; question: string }
+  | { kind: "answer"; text?: string; error?: string; question: string; sources?: RagSource[] }
   | { kind: "insights"; text?: string; error?: string }
   | null;
 
@@ -94,7 +94,7 @@ export default function DocumentIntelligenceTab({
         }),
       });
       const data = (await res.json()) as RagQueryResponse;
-      setResult({ kind: "answer", text: data.answer, error: data.error, question: query });
+      setResult({ kind: "answer", text: data.answer, error: data.error, question: query, sources: data.sources });
     } catch (err) {
       setResult({ kind: "answer", error: (err as Error).message, question: query });
     } finally {
@@ -200,7 +200,7 @@ export default function DocumentIntelligenceTab({
       {result && result.kind === "answer" && (
         <div>
           <p className="font-mono text-[11px] text-muted mb-2">Q: {result.question}</p>
-          <RagResultDisplay kind="answer" text={result.text} error={result.error} />
+          <RagResultDisplay kind="answer" text={result.text} error={result.error} sources={result.sources} />
         </div>
       )}
       {result && result.kind === "insights" && (

@@ -1,6 +1,61 @@
+# ─────────────────────────────────────────────────────────────
+# Secrets — never commit. Only the *.env.example templates belong in git.
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
 
-# runtime artifacts
+# ─────────────────────────────────────────────────────────────
+# Runtime data the app writes while running
+# ─────────────────────────────────────────────────────────────
+# Vector store: embedded chunks of uploaded documents (private data)
+chroma_data/
+# Audit log and eval outputs
 logs/
+*.log
 eval_results/
 questions_template.csv
+# Local upload directory, if LOCAL_UPLOAD_DIR points inside the repo
+ast_uploads/
+
+# ─────────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+astfs/
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+*.egg-info/
+
+# ─────────────────────────────────────────────────────────────
+# Node / Next.js
+# ─────────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+# Vercel project link (machine-specific)
+.vercel/
+
+# ─────────────────────────────────────────────────────────────
+# Editors and operating systems
+# ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { AutoAnalyzeResponse, AutoAnalyzeChart, FollowUpQaPair, FollowUpResponse } from "@/lib/pythonClient";
 import { getOrCreateSessionId } from "@/lib/sessionId";
 import { Plot, CHART_COLORS, themeTraces } from "@/components/ResultDisplay";
+import ShowWork from "@/components/ShowWork";
 
 function ChartPanel({
   chart,
@@ -46,6 +47,7 @@ function ChartPanel({
           onUpdate={(_figure: unknown, graphDiv: HTMLElement) => onGraphDiv(graphDiv)}
         />
       )}
+      <ShowWork code={chart.code} label="Chart code" />
     </div>
   );
 }
@@ -219,10 +221,27 @@ export default function AutoAnalyzeReport({
       <div className="flex flex-col gap-3 mb-6">
         {insights.map((ins, i) => (
           <div key={i} className="border-l-2 border-[#818CF8]/40 pl-3 border-b border-b-border/50 pb-3">
-            <p className="text-[#818CF8] text-sm">{ins.finding}</p>
+            <div className="flex items-start gap-2">
+              <p className="text-[#818CF8] text-sm flex-1">{ins.finding}</p>
+              {ins.verified && (
+                <span
+                  className="font-mono text-[10px] text-accent border border-accent/50 rounded px-1.5 py-0.5 shrink-0"
+                  title="Every number in this finding matched a computation run on your data"
+                >
+                  ✓ VERIFIED
+                </span>
+              )}
+            </div>
             <p className="font-mono text-xs text-[#FBBF24] mt-1">→ {ins.action}</p>
+            <ShowWork code={ins.code} evidence={ins.evidence} question={ins.question} />
           </div>
         ))}
+        {(report.droppedUnverified ?? 0) > 0 && (
+          <p className="font-mono text-[11px] text-muted">
+            {report.droppedUnverified} candidate finding(s) were left out because their numbers
+            could not be matched to a computation on your data.
+          </p>
+        )}
         {insights.length === 0 && (
           <p className="text-muted text-sm">No insights were generated for this dataset.</p>
         )}

@@ -17,6 +17,12 @@ for k in ("RATE_LIMIT_ENABLED", "RATE_LIMIT_MULTIPLIER", "CACHE_ENABLED", "MAX_U
 from fastapi.testclient import TestClient
 import api, cache_layer, rate_limiter, local_store
 
+# api.py loads the developer's real .env with override=True on import, which
+# would replace the test secret set above. Pin it back so the test always
+# authenticates with its own secret, whatever is in .env.
+os.environ["PYTHON_SERVICE_SECRET"] = "s3cret-for-tests"
+api.SERVICE_SECRET = "s3cret-for-tests"
+
 FAIL = []
 def check(label, cond, detail=""):
     print(f"[{'OK' if cond else 'FAIL'}] {label}" + (f" — {detail}" if detail and not cond else ""))

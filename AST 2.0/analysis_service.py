@@ -117,28 +117,24 @@ def _shape_result(value: Any) -> dict:
     return {"resultType": "scalar", "resultData": _json_safe_scalar(value)}
 
 
-def _compute_confidence(value: Any, success: bool, shortcut_used: bool) -> str:
-    """Same scoring approach as ui.py's compute_confidence(), reimplemented
-    here without a streamlit import (this module intentionally has none)."""
-    factors = 0
-    if value is not None:
-        factors += 1
-    if success:
-        factors += 1
-    if shortcut_used:
-        factors += 1
-    if isinstance(value, pd.DataFrame) and len(value) > 0:
-        factors += 1
-    elif isinstance(value, pd.Series) and len(value) > 0:
-        factors += 1
-    elif isinstance(value, (int, float)) and value == value:  # NaN check
-        factors += 1
-
-    if factors >= 4:
-        return "HIGH"
-    if factors >= 2:
-        return "MEDIUM"
-    return "LOW"
+def _describe_basis(value: Any, method: str, rows_analyzed: int | None) -> dict:
+    """What the answer rests on — replaces the old HIGH/MEDIUM/LOW
+    "confidence", which only measured whether code ran and returned
+    something (a wrong groupby that returned rows scored HIGH). This
+    describes the computation instead, so the UI can say exactly how the
+    answer was produced and the user can inspect the code itself."""
+    labels = {
+        "shortcut": "Computed by a rule-based shortcut (no LLM involved)",
+        "generated_python": "Computed by AI-written pandas code, run in the sandbox",
+        "generated_sql": "Computed by AI-written SQL, run in the sandbox",
+    }
+    result_rows = len(value) if isinstance(value, (pd.DataFrame, pd.Series)) else None
+    return {
+        "method": method,
+        "basis": labels.get(method, method),
+        "rowsAnalyzed": rows_analyzed,
+        "resultRows": result_rows,
+    }
 
 
 def _run_large_csv_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str) -> dict:
@@ -192,14 +188,13 @@ def _run_large_csv_analysis(csv_bytes: bytes, filename: str, query: str, session
             return {
                 "success": False, "resultType": "error", "resultData": None,
                 "error": "Could not generate a SQL query for this question — try again.",
-                "confidence": "LOW",
             }
 
         sbr = run_large_csv_sql_sandboxed(code, tmp_path, alias=alias, timeout_seconds=60)
     except Exception as e:
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": f"Large-file analysis pipeline failed: {e}", "confidence": "LOW",
+            "error": f"Large-file analysis pipeline failed: {e}",
         }
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -208,23 +203,24 @@ def _run_large_csv_analysis(csv_bytes: bytes, filename: str, query: str, session
     if not sbr.success:
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": sbr.error, "confidence": "LOW",
+            "error": sbr.error, "code": code, "method": "generated_sql",
         }
 
     try:
         shaped = _shape_result(sbr.value)
-        confidence = _compute_confidence(sbr.value, sbr.success, shortcut_used=False)
+        basis = _describe_basis(sbr.value, "generated_sql", None)
     except Exception as e:
         return {
             "success": False, "resultType": "error", "resultData": None,
             "error": f"Result shaping failed ({type(sbr.value).__name__}): {e}",
-            "confidence": "LOW",
+            "code": code,
         }
 
     return {
         "success": shaped["resultType"] != "error",
-        "confidence": confidence,
         "error": shaped.get("error"),
+        "code": code,
+        **basis,
         **{k: v for k, v in shaped.items() if k != "error"},
     }
 
@@ -247,6 +243,7 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
     instead of crashing api.py at startup before you even get to see
     what's wrong.
     """
+    retried = False
     try:
         from query_engine import (
             detect_shortcut,
@@ -257,11 +254,16 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
 
         shortcut_code = detect_shortcut(query, df)
         shortcut_used = shortcut_code is not None
+        # Column names PLUS value spellings / date ranges, so generated
+        # filters match the data (see query_engine.describe_schema). It's
+        # user data, so it is fenced as untrusted like every other prompt.
+        from query_engine import describe_schema
+        from prompt_injection_guard import wrap_untrusted
+        schema_text = wrap_untrusted(describe_schema(df), source_label="dataset columns and values")
 
         if shortcut_used:
             code = shortcut_code
         else:
-            schema_text = ", ".join(df.columns.tolist())
             prompt = build_analysis_prompt(schema_text, query)
             raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
             code = extract_and_clean_code(raw)
@@ -273,6 +275,24 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
         # production should rarely need anywhere near this ceiling — this
         # is a local-dev accommodation, not evidence the pipeline is slow.
         sbr = run_sandboxed(code, df, timeout_seconds=25)
+
+        # One repair attempt, same as Auto-Analyze charts already get: show
+        # the model its own code and the exact error. Generated code varies
+        # run to run, so one blocked method or wrong column name shouldn't
+        # cost the user the whole answer. Shortcuts are deterministic and
+        # aren't retried; the repaired code goes through the same sandbox.
+        retried = False
+        if not sbr.success and not shortcut_used and "timed out" not in (sbr.error or "").lower():
+            retry_prompt = _build_query_repair_prompt(schema_text, query, code, sbr.error)
+            raw = llm_with_fallback(retry_prompt, temperature=0.0, session_id=session_id)
+            repaired = extract_and_clean_code(raw)
+            if repaired.strip() and repaired.strip() != code.strip():
+                retried = True
+                first_error = sbr.error
+                code = repaired
+                sbr = run_sandboxed(code, df, timeout_seconds=25)
+                if not sbr.success:
+                    sbr.error = f"{sbr.error} (first attempt: {first_error})"
     except Exception as e:
         # Anything unexpected here (a bad LLM response shape, an import
         # failure, a query_engine bug) becomes a clean error response
@@ -280,18 +300,19 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
         # not a Streamlit script with its own error boundary.
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": f"Analysis pipeline failed: {e}", "confidence": "LOW",
+            "error": f"Analysis pipeline failed: {e}",
         }
 
+    method = "shortcut" if shortcut_used else "generated_python"
     if not sbr.success:
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": sbr.error, "confidence": "LOW",
+            "error": sbr.error, "code": code, "method": method, "retried": retried,
         }
 
     try:
         shaped = _shape_result(sbr.value)
-        confidence = _compute_confidence(sbr.value, sbr.success, shortcut_used)
+        basis = _describe_basis(sbr.value, method, len(df))
     except Exception as e:
         # sbr.value came out of the sandbox successfully, but shaping it
         # into JSON (e.g. fig.to_json() on a malformed Plotly figure)
@@ -301,15 +322,31 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
         return {
             "success": False, "resultType": "error", "resultData": None,
             "error": f"Result shaping failed ({type(sbr.value).__name__}): {e}",
-            "confidence": "LOW",
+            "code": code,
         }
 
     return {
         "success": shaped["resultType"] != "error",
-        "confidence": confidence,
         "error": shaped.get("error"),
+        "code": code,
+        "retried": retried,
+        **basis,
         **{k: v for k, v in shaped.items() if k != "error"},
     }
+
+
+def _build_query_repair_prompt(schema_text: str, query: str, code: str, error: str) -> str:
+    from query_engine import build_analysis_prompt
+    return (
+        build_analysis_prompt(schema_text, query)
+        + "\n\nYOUR PREVIOUS ATTEMPT FAILED.\n"
+        + "Previous code:\n```python\n" + code + "\n```\n"
+        + "Error: " + str(error) + "\n\n"
+        + "Rewrite the code so it answers the same request and works. If the error "
+        + "says something is 'blocked in the sandbox', do NOT use it — reach the same "
+        + "result with basic pandas operations (groupby/agg/value_counts/reset_index/"
+        + "sort_values/rename). Output ONLY the corrected Python code."
+    )
 
 
 def run_analysis_from_cleaned_df(cleaned_df: pd.DataFrame, query: str, session_id: str) -> dict:
@@ -328,7 +365,8 @@ def run_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str, f
     -> sandboxed exec -> shape result.
 
     Returns a dict matching the /analyze response contract exactly:
-        {success, resultType, resultData, error, confidence}
+        {success, resultType, resultData, error, code, method, basis,
+         rowsAnalyzed, resultRows}
 
     Files above file_reader.LARGE_FILE_THRESHOLD_BYTES (CSV/TXT only —
     see should_use_large_csv_path) never reach pd.read_csv() at all;
@@ -358,7 +396,7 @@ def run_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str, f
     except Exception as e:
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": f"Could not parse file: {e}", "confidence": "LOW",
+            "error": f"Could not parse file: {e}",
         }
 
     import cache_layer

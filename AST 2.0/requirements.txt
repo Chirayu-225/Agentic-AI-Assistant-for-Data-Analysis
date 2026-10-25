@@ -1,5 +1,5 @@
-# ── Core UI ───────────────────────────────────────────────────────────────────
-streamlit>=1.35.0
+# The FastAPI service has no Streamlit dependency. Only the legacy UI
+# (ui.py, legacy_streamlit/) needs it:  pip install "streamlit>=1.35.0"
 
 # ── LLM provider ──────────────────────────────────────────────────────────────
 groq>=1.5.0
@@ -17,7 +17,6 @@ matplotlib>=3.8.0
 # ── RAG — embeddings ──────────────────────────────────────────────────────────
 # torch CPU only — no CUDA, no torchaudio, no torchvision conflicts
 torch
-torchvision
 
 # ── RAG — sentence embeddings ─────────────────────────────────────────────────
 sentence-transformers>=2.7.0
@@ -35,10 +34,7 @@ pyarrow>=14.0.0  # Arrow handoff for the large-CSV DuckDB-native path — see sa
 # ── Env vars ──────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0
 
-# ── API service (api.py) — exposes /analyze to the Next.js frontend ───────────
-# streamlit above is still required even here: llm_provider.py uses
-# st.cache_data for the code-gen cache, imported transitively via
-# query_engine.py. Not used for any UI in api.py itself.
+# ── API service (api.py) — serves the Next.js frontend ───────────────────────
 fastapi>=0.110.0
 uvicorn>=0.29.0
 requests>=2.31.0

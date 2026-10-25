@@ -7,7 +7,7 @@ Pipeline:
   3. Embed   — encode chunks with a local sentence-transformer model
   4. Store   — keep vectors in an in-memory ChromaDB collection
   5. Retrieve — find top-k most relevant chunks for a query
-  6. Generate — pass retrieved chunks to Qwen via Ollama for an answer
+  6. Generate — pass retrieved chunks to the chat model (llm_provider.py) for an answer, returned with its source passages
 
 Only retrieved passage text is sent to the LLM API (Groq) at query time —
 parsing, chunking, and embedding all happen locally with no network call.
@@ -414,7 +414,7 @@ USER QUESTION:
 Instructions:
 - Answer the question using ONLY the information in the passages above.
 - If the answer is not in the passages, say: "This information is not found in the document."
-- Be specific. Quote or reference passage numbers where helpful.
+- Be specific. Cite the passages you used as (Passage N) after each claim.
 - Keep the answer concise and factual. Plain English only.
 """
 
@@ -449,12 +449,51 @@ Format: 1• finding → implication
 """
 
 
+def retrieve_with_scores(doc_id: str, query: str, top_k: int = 5) -> list[tuple[str, float]]:
+    """retrieve(), but keeping each chunk's vector distance so the UI can
+    show the user which passages an answer was built from."""
+    model      = get_embed_model()
+    query_vec  = model.encode([query], show_progress_bar=False, convert_to_numpy=True).tolist()
+    collection = get_collection(doc_id)
+    results    = collection.query(
+        query_embeddings = query_vec,
+        n_results        = min(top_k, collection.count()),
+        include          = ["documents", "distances"],
+    )
+    docs  = results["documents"][0]
+    dists = (results.get("distances") or [[None] * len(docs)])[0]
+    return list(zip(docs, dists))
+
+
 def rag_answer(doc_id: str, query: str, doc_name: str,
                top_k: int = 5, temperature: float = 0.2) -> str:
     """Full RAG pipeline: retrieve → build prompt → generate answer via Groq."""
-    chunks = retrieve(doc_id, query, top_k=top_k)
+    return rag_answer_with_sources(doc_id, query, doc_name, top_k, temperature)["answer"]
+
+
+def rag_answer_with_sources(doc_id: str, query: str, doc_name: str,
+                            top_k: int = 5, temperature: float = 0.2) -> dict:
+    """Same pipeline as rag_answer, plus the passages it was grounded in.
+    Passage numbers match the [Passage N] labels the model was told to
+    cite, so "see Passage 2" in an answer points at a visible source.
+    Passages are returned in full, PII-redacted exactly like the prompt copy."""
+    from pii_redaction import redact_pii_logged
+    scored = retrieve_with_scores(doc_id, query, top_k=top_k)
+    chunks = [c for c, _ in scored]
     prompt = build_rag_prompt(query, chunks, doc_name)
-    return llm_chat_call(prompt, temperature).strip()
+    answer = llm_chat_call(prompt, temperature).strip()
+    sources = []
+    for i, (chunk, dist) in enumerate(scored, start=1):
+        text = redact_pii_logged(chunk, context=f"RAG source {i}")
+        # The FULL passage: chunks are capped at ~400 words, and cutting them
+        # short meant the sentence an answer relied on could be missing from
+        # the source the user opens to check it (found by eval_rag.py).
+        sources.append({
+            "passage": i,
+            "text": text,
+            "distance": round(float(dist), 4) if dist is not None else None,
+        })
+    return {"answer": answer, "sources": sources}
 
 
 def extract_document_insights(doc_id: str, doc_name: str,

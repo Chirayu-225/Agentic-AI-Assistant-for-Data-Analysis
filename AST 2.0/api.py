@@ -50,6 +50,7 @@ import audit_log
 import cache_layer
 import rate_limiter
 import local_store
+from llm_provider import usage_stats as llm_usage_stats
 
 SERVICE_SECRET = os.environ.get("PYTHON_SERVICE_SECRET", "")
 
@@ -70,6 +71,23 @@ print(f"[api] PYTHON_SERVICE_SECRET fingerprint: {_fp(SERVICE_SECRET) if SERVICE
 FETCH_TIMEOUT_SECONDS = 120
 
 app = FastAPI(title="Analyst Assistant API")
+
+# Say loudly, once, when generated code will run WITHOUT a memory cap.
+# The cap relies on Unix's resource.setrlimit; on Windows it is skipped,
+# so a runaway computation can use all of the machine's memory. Fine for
+# local development; production must run on Linux (or WSL/Docker locally).
+try:
+    from sandbox_limits import _HAS_RESOURCE as _SANDBOX_HAS_MEMORY_CAP
+except Exception:
+    _SANDBOX_HAS_MEMORY_CAP = False
+if not _SANDBOX_HAS_MEMORY_CAP:
+    print(
+        "[api] WARNING: sandbox memory limit is NOT enforced on this platform "
+        "(no Unix 'resource' module, e.g. native Windows). Generated code can use "
+        "unlimited memory. Run the backend under Linux, WSL or Docker for the "
+        "production-equivalent sandbox.",
+        flush=True,
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -223,29 +241,26 @@ def _limit(group: str, key: str, session_id: str | None = None, filename: str | 
 
 
 def _fetch_blob(file_url: str) -> tuple[bytes | None, dict | None]:
-    """Shared by /analyze and /rag/index — fetch the uploaded file from
-    Blob storage. Returns (bytes, None) on success or (None, error_dict)."""
-    # Files uploaded through POST /upload live on local disk (local_store.py);
-    # anything else is treated as a remote URL (e.g. a Vercel Blob URL).
-    if local_store.is_local_url(file_url):
-        data = local_store.load(file_url)
-        if data is None:
-            return None, {"success": False,
-                          "error": "The uploaded file is no longer available — please upload it again."}
-        return data, None
+    """Shared by every endpoint that reads an uploaded file. Returns
+    (bytes, None) on success or (None, error_dict).
 
-    cached = cache_layer.blob_cache.get(file_url)
-    if cached is not None:
-        return cached, None
-    try:
-        resp = requests.get(file_url, timeout=FETCH_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        # Blob URLs are unique per upload, so (url -> bytes) can't go stale;
-        # see cache_layer.py. Files too big for the cache just aren't stored.
-        cache_layer.blob_cache.put(file_url, resp.content, len(resp.content))
-        return resp.content, None
-    except Exception as e:
-        return None, {"success": False, "error": f"Could not fetch file from storage: {e}"}
+    SECURITY: only local:// references produced by POST /upload are
+    accepted. This used to download ANY other URL it was handed (left over
+    from Vercel Blob uploads), which let a caller make the server fetch
+    arbitrary addresses, including internal ones (server-side request
+    forgery). Nothing in the current frontend sends remote URLs, so they
+    are now rejected outright. If remote storage comes back, allow only
+    that storage's exact https hostname here, never "any URL".
+    """
+    if not local_store.is_local_url(file_url):
+        audit_log.record("blocked_remote_url")
+        return None, {"success": False,
+                      "error": "Only files uploaded through this app can be analysed."}
+    data = local_store.load(file_url)
+    if data is None:
+        return None, {"success": False,
+                      "error": "The uploaded file is no longer available — please upload it again."}
+    return data, None
 
 
 @app.post("/upload")
@@ -283,7 +298,14 @@ async def upload(request: Request, x_service_secret: str = Header(default=""),
 def health():
     # Cheap endpoint for Render's health checks / manual "is it up" pings —
     # deliberately requires no secret, since it reveals nothing sensitive.
-    return {"status": "ok"}
+    # Model names are reported so the UI shows what is really configured
+    # (they can be changed via GROQ_CODE_MODEL / GROQ_CHAT_MODEL).
+    import llm_provider
+    return {
+        "status": "ok",
+        "models": {"code": llm_provider._CODE_MODEL, "chat": llm_provider._CHAT_MODEL},
+        "sandboxMemoryCap": _SANDBOX_HAS_MEMORY_CAP,
+    }
 
 
 @app.post("/analyze")
@@ -305,12 +327,12 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
         except Exception as e:
             return {
                 "success": False, "resultType": "error", "resultData": None,
-                "error": f"Unexpected server error: {e}", "confidence": "LOW",
+                "error": f"Unexpected server error: {e}",
             }
 
     content, err = _fetch_blob(req.fileUrl)
     if err is not None:
-        return {**err, "resultType": "error", "resultData": None, "confidence": "LOW"}
+        return {**err, "resultType": "error", "resultData": None}
 
     try:
         return run_analysis(content, req.filename, req.query, req.sessionId, file_url=req.fileUrl)
@@ -321,7 +343,7 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
         # those internal guards and is worth investigating directly.
         return {
             "success": False, "resultType": "error", "resultData": None,
-            "error": f"Unexpected server error: {e}", "confidence": "LOW",
+            "error": f"Unexpected server error: {e}",
         }
 
 
@@ -484,4 +506,6 @@ def admin_stats(x_service_secret: str = Header(default="")):
             "chain": audit_log.verify_chain(),
             "eventCounts": audit_log.summarize(),
         },
+        "sandboxMemoryCap": _SANDBOX_HAS_MEMORY_CAP,
+        "llmUsage": llm_usage_stats(),
     }

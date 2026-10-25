@@ -218,9 +218,10 @@ def _run_one_chart(plan: dict, schema_text: str, df: pd.DataFrame, session_id: s
             return {
                 **base, "resultType": "chart",
                 "resultData": json.loads(sbr.value.to_json()), "error": None,
+                "code": code,
             }
 
-        return {**base, "resultType": "error", "resultData": None, "error": last_error}
+        return {**base, "resultType": "error", "resultData": None, "error": last_error, "code": code}
     except Exception as e:
         return {**base, "resultType": "error", "resultData": None, "error": f"Chart generation failed: {e}"}
 
@@ -228,14 +229,17 @@ def _run_one_chart(plan: dict, schema_text: str, df: pd.DataFrame, session_id: s
 def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
     """
     1. Parse + rule-clean the CSV (identical prep to /analyze and /clean).
-    2. Build the dataset profile, ask the LLM for up to 5 ranked
-       insight+action pairs.
+    2. Build the dataset profile; the LLM proposes computations, the
+       sandbox runs them, the LLM phrases findings from the results, and
+       insight_verifier drops any finding whose numbers weren't computed.
     3. Ask the LLM to pick up to 3 charts that best support those
        insights, then generate + sandbox-execute each independently.
 
     Returns:
-        {success, filename, insights: [{finding, action}],
-         charts: [{title, why, resultType, resultData, error}], error}
+        {success, filename,
+         insights: [{finding, action, question, code, evidence, verified}],
+         droppedUnverified: int,
+         charts: [{title, why, resultType, resultData, error, code}], error}
     """
     try:
         df = _read_csv(csv_bytes, filename)
@@ -243,12 +247,13 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
         return {"success": False, "error": f"Could not parse CSV: {e}"}
 
     try:
+        from cleaning import detect_currencies
+        currencies = detect_currencies(df)  # from the RAW frame — cleaning strips symbols
         df, _rule_log = cached_rule_clean(df, csv_bytes, rule_based_clean)
 
         from profiler import (
             build_dataset_profile,
             format_profile_for_llm,
-            build_auto_analyze_prompt,
             build_chart_plan_prompt,
         )
         from query_engine import insight_llm
@@ -256,39 +261,21 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
         profile = build_dataset_profile(df, _cache_key="auto-analyze")
         profile_str = format_profile_for_llm(profile)
 
-        # LIVE BUG: insights generation used to go through llm_with_fallback
-        # (query_engine.py) which — despite the generic name — ALWAYS calls
-        # llm_code_call, i.e. the smaller code-specialised model
-        # (_CODE_MODEL = "openai/gpt-oss-20b"), never the larger
-        # _CHAT_MODEL ("openai/gpt-oss-120b") that query_engine.insight_llm
-        # exists specifically to reach. That's backwards for this prompt:
-        # build_auto_analyze_prompt asks for business prose in an exact
-        # numbered format, not code, and the smaller model was measurably
-        # less reliable at holding that format on some real datasets — a
-        # small (7-row), numerically dense table extracted from a PDF
-        # (13 near-identical monthly columns) produced a response
-        # _parse_insights couldn't find a single "N•" block in, surfaced
-        # to the user as "Could not generate insights for this dataset."
-        # insight_llm/the 120B chat model is already wired up and used
-        # correctly elsewhere in this file's sibling function
-        # (query_engine.insight_llm) — every other prompt in this app
-        # that must produce valid Python/SQL stays on llm_with_fallback;
-        # this one and the chart-plan prompt below don't produce code at
-        # all, so they're the ones that should have been on the chat
-        # model all along.
-        insights_prompt = build_auto_analyze_prompt(profile_str)
-        insights_raw = insight_llm(insights_prompt, temperature=0.3)
-        insights = _parse_insights(insights_raw)
+        # VERIFIED INSIGHTS: plan -> compute -> write -> verify. Insights
+        # used to be prose written straight from the profile, with no check
+        # that the numbers in them were real. Now every number shown must
+        # match a sandboxed computation over the actual data, or the
+        # insight is dropped. See _verified_insights and insight_verifier.py.
+        insights, dropped = _verified_insights(df, profile_str, session_id, currencies)
 
         if not insights:
-            # Same reasoning as the chart-plan-parsing failure below:
-            # print the raw response so a real parsing gap is debuggable
-            # from server logs, instead of looking identical to "the
-            # model genuinely had nothing to say about this dataset."
-            print(f"[auto-analyze] 0 insights parsed. Raw LLM response was:\n{insights_raw}", flush=True)
             return {
                 "success": False,
-                "error": "Could not generate insights for this dataset — try again.",
+                "error": (
+                    "No finding could be verified against your data, so none are shown "
+                    "(Auto-Analyze only displays findings whose numbers were computed). "
+                    "Try again, or ask a specific question in the query panel."
+                ),
             }
 
         insights_text = "\n".join(
@@ -335,6 +322,7 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
             "success": True,
             "filename": filename,
             "insights": insights,
+            "droppedUnverified": dropped,
             "charts": charts,
             "chartsError": charts_error,
             "error": None,
@@ -448,3 +436,127 @@ def answer_followup(
         return {"success": True, "answer": answer.strip(), "error": None}
     except Exception as e:
         return {"success": False, "error": f"Follow-up failed: {e}"}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verified insights
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MAX_PLANNED = 6
+
+
+def _parse_json_array(raw: str) -> list[dict]:
+    """Pulls the first JSON array out of a model response (tolerates a
+    ```json fence or a sentence before it)."""
+    cleaned = re.sub(r"```(?:json)?", "", raw)
+    m = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return []
+    return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+
+
+def _compute_evidence(item: dict, df: pd.DataFrame, session_id: str) -> tuple[str, Any, str | None]:
+    """Runs one planned computation in the sandbox, with one repair retry.
+    Returns (code, value, error)."""
+    from query_engine import build_retry_prompt, extract_and_clean_code, llm_with_fallback
+    from sandbox_limits import run_sandboxed
+
+    code = extract_and_clean_code(str(item.get("code", "")))
+    error = "no code proposed"
+    for attempt in range(2):
+        if not code.strip():
+            break
+        sbr = run_sandboxed(code, df, include_charts=False, timeout_seconds=15)
+        if sbr.success and sbr.produced and sbr.value is not None:
+            return code, sbr.value, None
+        error = sbr.error or "the code did not assign a result"
+        if attempt == 0:
+            try:
+                raw = llm_with_fallback(build_retry_prompt(code, error), temperature=0.0, session_id=session_id)
+                code = extract_and_clean_code(raw)
+            except Exception as e:  # repair is best-effort
+                error = f"{error}; repair failed: {e}"
+                break
+    return code, None, error
+
+
+def _verified_insights(df: pd.DataFrame, profile_str: str, session_id: str,
+                       currencies: dict | None = None) -> tuple[list[dict], int]:
+    """plan -> compute -> write -> verify. Returns (insights, dropped_count)."""
+    from insight_verifier import verify_finding
+    from pii_redaction import redact_pii_logged
+    from profiler import build_insight_plan_prompt, build_insight_writeup_prompt
+    from prompt_injection_guard import wrap_untrusted
+    from query_engine import insight_llm
+
+    schema_text = ", ".join(map(str, df.columns.tolist()))
+
+    # 1. PLAN — questions + code, no numbers.
+    plan_raw = insight_llm(build_insight_plan_prompt(profile_str, schema_text, _MAX_PLANNED), temperature=0.2)
+    plan = [p for p in _parse_json_array(plan_raw) if p.get("code")][:_MAX_PLANNED]
+    if not plan:
+        print(f"[auto-analyze] insight plan unparseable. Raw response:\n{plan_raw}", flush=True)
+        return [], 0
+
+    # 2. COMPUTE — each item in its own sandbox run, one after another.
+    # Deliberately NOT a thread pool: the sandbox forks a worker on Linux,
+    # and forking while other threads hold locks can leave the child
+    # deadlocked (seen in testing: one worker hung until its timeout).
+    computed = [_compute_evidence(item, df, session_id) for item in plan]
+
+    items = []
+    for idx, (item, (code, value, err)) in enumerate(zip(plan, computed), start=1):
+        if value is None:
+            print(f"[auto-analyze] planned item {idx} failed to compute: {err}", flush=True)
+            continue
+        shown = redact_pii_logged(_format_computed_value(value), context=f"auto-analyze evidence {idx}")
+        items.append({"id": idx, "question": str(item.get("question", "")).strip(),
+                      "metric": str(item.get("metric", "")).strip(),
+                      "code": code, "value": value, "shown": shown})
+    if not items:
+        return [], 0
+
+    # 3. WRITE — findings phrased from computed results only.
+    blocks = [
+        f"ITEM {it['id']}\nQUESTION: {it['question']}\nMEASURES: {it['metric']}\nRESULT:\n"
+        + wrap_untrusted(it["shown"], source_label=f"computed result for item {it['id']}")
+        for it in items
+    ]
+    write_raw = insight_llm(build_insight_writeup_prompt(blocks, currencies), temperature=0.2)
+    written = _parse_json_array(write_raw)
+    by_id = {it["id"]: it for it in items}
+
+    # 4. VERIFY — every number must be in that item's computed result.
+    insights, dropped = [], 0
+    for w in written:
+        try:
+            it = by_id[int(w.get("id"))]
+        except (TypeError, ValueError, KeyError):
+            dropped += 1
+            continue
+        finding = " ".join(str(w.get("finding", "")).split())
+        action = " ".join(str(w.get("action", "")).split())
+        if not finding or not action:
+            dropped += 1
+            continue
+        check = verify_finding(finding, it["value"], set((currencies or {}).values()))
+        if not check["verified"]:
+            dropped += 1
+            print(f"[auto-analyze] dropped unverified finding (item {it['id']}): "
+                  f"unsupported={check['unsupported']} checked={check['checked']}", flush=True)
+            continue
+        insights.append({
+            "finding": finding,
+            "action": action,
+            "question": it["question"],
+            "code": it["code"],
+            "evidence": it["shown"],
+            "verified": True,
+        })
+        if len(insights) == 5:
+            break
+    return insights, dropped
+

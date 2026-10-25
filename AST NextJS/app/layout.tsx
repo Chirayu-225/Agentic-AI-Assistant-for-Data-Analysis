@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Analyst Assistant",
-  description: "AI-powered data intelligence — secure analytics terminal",
+  description: "Verified answers from finance and operations spreadsheets — every number computed, every computation inspectable.",
 };
 
 export default function RootLayout({

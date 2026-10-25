@@ -10,21 +10,53 @@ build_explain_prompt()      → drill-down explanation prompt
 
 import pandas as pd
 import numpy as np
-import streamlit as st
+import copy
+import hashlib
+from collections import OrderedDict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATASET PROFILER
 # ─────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
+_PROFILE_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_PROFILE_CACHE_MAX = 32
+
+
+def _frame_fingerprint(df: pd.DataFrame) -> str:
+    """Content hash of a DataFrame (values + index + column names/dtypes),
+    used as the profile cache key. Replaces st.cache_data, which hashed the
+    frame the same way but made Streamlit a dependency of the API."""
+    h = hashlib.sha256()
+    h.update(repr(list(map(str, df.columns))).encode())
+    h.update(repr(list(map(str, df.dtypes))).encode())
+    try:
+        h.update(pd.util.hash_pandas_object(df, index=True).values.tobytes())
+    except TypeError:  # unhashable cells (lists/dicts) — fall back to text
+        h.update(df.to_csv(index=True).encode("utf-8", "replace"))
+    return h.hexdigest()
+
+
 def build_dataset_profile(dataframe: pd.DataFrame, _cache_key: str = "") -> dict:
     """
-    Compute a structured statistical profile. Cached by Streamlit.
-    Pass _cache_key="cleaned" after cleaning to force a fresh profile
-    and prevent stale raw-data stats being used for insights.
-    Expensive ops use a 5000-row sample for large datasets.
+    Compute a structured statistical profile, memoised on the frame's
+    content so identical data is profiled once. (_cache_key is kept for
+    call-site compatibility; the content hash already distinguishes raw
+    from cleaned data.) Expensive ops use a 5000-row sample for large
+    datasets.
     """
+    key = _frame_fingerprint(dataframe)
+    if key in _PROFILE_CACHE:
+        _PROFILE_CACHE.move_to_end(key)
+        return copy.deepcopy(_PROFILE_CACHE[key])
+    profile = _build_dataset_profile_uncached(dataframe)
+    _PROFILE_CACHE[key] = profile
+    while len(_PROFILE_CACHE) > _PROFILE_CACHE_MAX:
+        _PROFILE_CACHE.popitem(last=False)
+    return copy.deepcopy(profile)
+
+
+def _build_dataset_profile_uncached(dataframe: pd.DataFrame) -> dict:
     profile: dict = {
         "rows":    dataframe.shape[0],
         "columns": dataframe.shape[1],
@@ -162,8 +194,9 @@ def build_insight_prompt(user_query: str, result_profile_str: str,
     Strict actionability rules — no data quality complaints, no raw descriptions.
     """
     return f"""You are a senior business analyst presenting findings to a CEO.
-The data has already been cleaned. Do NOT mention nulls, missing values, data types,
-or data quality. The audience does not care about the data — they care about the business.
+Lead with business findings. If a data-quality issue (missing values, a
+small sample, an implausible value) would change how much the reader
+should trust a finding, say so briefly in that finding — do not hide it.
 
 A user asked: "{user_query}"
 
@@ -177,10 +210,11 @@ Write 3 to 5 BUSINESS insights ranked by impact. Each insight must:
 1. State a specific, quantified business finding (revenue, volume, rank, gap, trend)
 2. Immediately follow it with a concrete business action
 
-CORRECT examples:
-1• Classic Cars generates 39% of total revenue but only 18% of order volume — increase unit price or upsell accessories to this segment
-2• Motorcycles have the lowest average order value ($950) vs the dataset mean ($3,200) — investigate pricing strategy or target higher-value customers
-3• Q4 sales are 2.3× higher than Q1 — align inventory procurement and staffing to seasonal demand pattern
+CORRECT shape (placeholders, NOT real numbers — every figure you write
+must be copied from ANALYSIS RESULT or FULL DATASET CONTEXT above; if a
+figure isn't there, don't state one):
+1• [segment] generates [share from the result] of [metric] — [specific action for that segment]
+2• [segment] has the lowest [metric from the result] — [specific action]
 
 WRONG examples (do NOT write these):
 ✗ The dataset contains 2,823 rows and 25 columns
@@ -199,8 +233,8 @@ Format: 1• [quantified business finding] — [specific action to take]
 
 def build_auto_analyze_prompt(dataset_profile_str: str) -> str:
     return f"""You are a senior business analyst presenting to a CEO for the first time.
-The data has already been cleaned and standardised. Do NOT mention nulls, missing values,
-data types, or anything about data quality. Focus entirely on business findings.
+Focus on business findings, but if a data-quality issue would change how
+much a finding can be trusted, say so briefly in that finding.
 
 DATASET PROFILE:
 {dataset_profile_str}
@@ -209,10 +243,10 @@ Write the 5 most impactful BUSINESS insights from this dataset, ranked by busine
 
 Each insight must answer: "What does this mean for the business, and what should we do?"
 
-CORRECT examples:
-1• Classic Cars(967 orders) outsells Motorcycles(331) by 3× — concentrate sales and marketing resources on this category
-2• The top 2 product lines contribute over 65% of order volume — diversification risk is high; develop the bottom 3 lines
-3• Sales std deviation ($1.2M) is 40% of the mean — highly inconsistent performance; identify what drives the top-quartile transactions
+CORRECT shape (placeholders, NOT real numbers — only state figures that
+appear in the DATASET PROFILE above):
+1• [category] leads [metric] at [value from the profile] — [specific action]
+2• [metric] varies widely ([figure from the profile]) — [specific action]
 
 WRONG examples (never write these):
 ✗ The dataset has 2,823 rows
@@ -580,4 +614,83 @@ Explain this in business terms. Cover exactly these four points:
 4. What could make this insight wrong — data limitations, seasonality, confounders
 
 Be direct. No filler. Plain English. No mentions of data cleaning or data structure.
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verified Auto-Analyze — plan -> compute -> write -> verify
+# (see auto_analyze_service.run_auto_analyze and insight_verifier.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_insight_plan_prompt(dataset_profile_str: str, schema_text: str, max_items: int = 6) -> str:
+    """Step 1: the model proposes WHAT to compute, never the answer.
+    Each item is a business question plus pandas code that computes the
+    evidence for it. The numbers come later, from the sandbox."""
+    return f"""You are a senior business analyst planning an analysis. You will NOT
+see any results yet. Propose up to {max_items} computations whose results are
+most likely to reveal decision-relevant business findings (concentration,
+gaps between segments, rankings, shares, relationships between measures,
+change over time if a date column exists).
+
+DATASET PROFILE (for orientation only — do not copy numbers from it):
+{dataset_profile_str}
+
+Exact column names of the DataFrame `df` (use ONLY these):
+{schema_text}
+
+Respond with a JSON array and nothing else. Each element:
+{{"question": "<the business question in one sentence>",
+  "code": "<pandas code that assigns a small result to `result`>",
+  "metric": "<what the numbers in result measure, with units if known>"}}
+
+Code rules:
+- pandas as pd and numpy as np are available. No imports, no print(), no file access.
+- Assign the evidence to `result`: a scalar, or a Series/DataFrame of at most 20 rows.
+- Prefer results that contain the exact figures a finding would cite
+  (e.g. include both totals and shares as columns rather than leaving a
+  ratio for the writer to work out).
+- groupby()/value_counts() put the key in the index — call .reset_index()
+  before referencing it by name. Never assign to .columns; use .rename().
+"""
+
+
+def build_insight_writeup_prompt(computed_blocks: list[str], currencies: dict | None = None) -> str:
+    """Step 3: the model phrases findings from computed results ONLY.
+    insight_verifier then drops any finding whose numbers are not in
+    that item's computed result."""
+    joined = "\n\n".join(computed_blocks)
+    if currencies:
+        money = "; ".join(f"'{c}' is in {label}" for c, label in currencies.items())
+        currency_rule = (f"- Money in this dataset: {money}. Use exactly that currency "
+                         f"symbol for money figures, never another one (no '$' for rupees).")
+    else:
+        currency_rule = ("- No currency appears in this dataset: write money-like figures "
+                         "as plain numbers, with no currency symbol.")
+    return f"""You are a senior business analyst writing for a finance or operations lead.
+Below are computations that were actually run against the user's data,
+each with its question and its real result.
+
+{joined}
+
+For each item whose result supports a useful business finding, write one
+finding and one action. Respond with a JSON array and nothing else:
+[{{"id": <item id>, "finding": "<one sentence>", "action": "<one sentence>"}}]
+
+Hard rules:
+- Every number in a finding MUST appear in that item's result exactly as
+  computed (you may round to fewer decimals, write 0.39 as 39%, or
+  abbreviate 1,204,331 as 1.2M). Never compute a new number yourself —
+  no ratios, differences or "x times" unless that figure is in the result.
+- Don't use ratio words ("doubled", "tripled", "half", "majority") unless
+  the figures you cite actually show that ratio, and don't use words that
+  claim a pattern across every period or member ("consistently",
+  "steadily", "always", "every month") — one result can't show that.
+{currency_rule}
+- Write ratios and growth rates as percentages ("47.8%"), never as raw
+  decimals ("0.478", "-1.000"). Never mention NaN/None/null values or
+  data-quality artefacts unless they change a business conclusion.
+- If a result is empty, trivial or not decision-relevant, skip that item.
+- If the result reveals a data-quality caveat (tiny sample, many missing
+  values), mention it in the finding.
+- Rank the array by business impact, most important first. At most 5 items.
 """

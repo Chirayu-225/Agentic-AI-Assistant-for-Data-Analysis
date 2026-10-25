@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { AnalyzeResponse } from "@/lib/pythonClient";
+import ShowWork from "@/components/ShowWork";
 
 // Plotly touches `window` at import time, so it can only load client-side —
 // dynamic() with ssr:false is required here, not just a style preference.
@@ -49,6 +50,7 @@ export default function ResultDisplay({ result }: { result: AnalyzeResponse }) {
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
         <p className="font-mono text-xs text-red-400 mb-1">// ERROR</p>
         <p className="text-red-300 text-sm">{result.error ?? "Unknown error"}</p>
+        <ShowWork code={result.code} language={result.method === "generated_sql" ? "sql" : "python"} label="Code that failed" />
       </div>
     );
   }
@@ -57,9 +59,10 @@ export default function ResultDisplay({ result }: { result: AnalyzeResponse }) {
     <div className="border border-border rounded-lg p-6 bg-panel">
       <div className="flex items-center justify-between mb-4">
         <p className="font-mono text-sm text-muted">// RESULT</p>
-        {result.confidence && (
-          <span className="font-mono text-xs text-accent">
-            CONFIDENCE: {result.confidence}
+        {result.basis && (
+          <span className="font-mono text-[11px] text-muted text-right">
+            {result.basis}
+            {typeof result.rowsAnalyzed === "number" && ` · ${result.rowsAnalyzed.toLocaleString()} rows`}
           </span>
         )}
       </div>
@@ -86,6 +89,8 @@ export default function ResultDisplay({ result }: { result: AnalyzeResponse }) {
           config={{ displayModeBar: false }}
         />
       )}
+
+      <ShowWork code={result.code} language={result.method === "generated_sql" ? "sql" : "python"} />
     </div>
   );
 }

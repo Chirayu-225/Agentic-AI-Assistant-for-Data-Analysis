@@ -22,7 +22,7 @@ import { getOrCreateSessionId } from "@/lib/sessionId";
 const STEPS = [
   { number: "01", label: "INGEST", description: "Upload your dataset via the sidebar panel" },
   { number: "02", label: "QUERY", description: "Enter a natural language analytical question" },
-  { number: "03", label: "ANALYZE", description: "Groq's open models generate and execute sandboxed Python code" },
+  { number: "03", label: "VERIFY", description: "Every answer is computed by sandboxed code you can inspect" },
 ];
 
 const EXAMPLE_QUERIES = [

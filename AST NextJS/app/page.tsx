@@ -33,13 +33,13 @@ export default function Home() {
 
         <div className="flex gap-6 border-b border-border mb-6">
           <TabButton active={tab === "csv"} onClick={() => setTab("csv")}>
-            ⚡ CSV Analysis
+            ⚡ Spreadsheet Analysis
           </TabButton>
           <TabButton active={tab === "document"} onClick={() => setTab("document")}>
-            📄 Document Intelligence
+            📄 Documents <BetaTag />
           </TabButton>
           <TabButton active={tab === "multi"} onClick={() => setTab("multi")}>
-            🔗 Multi-Dataset Query
+            🔗 Join Datasets <BetaTag />
           </TabButton>
         </div>
 
@@ -93,6 +93,17 @@ export default function Home() {
         </div>
       </main>
     </div>
+  );
+}
+
+// Spreadsheet Analysis is the product; the other two tabs are useful
+// extensions but are not yet covered by the held-out evals to the same
+// standard, so they're labelled as beta rather than presented as equals.
+function BetaTag() {
+  return (
+    <span className="ml-1 align-middle text-[9px] tracking-widest border border-border rounded px-1 py-px text-muted">
+      BETA
+    </span>
   );
 }
 

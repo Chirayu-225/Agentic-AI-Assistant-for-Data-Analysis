@@ -253,7 +253,15 @@ def safe_exec(code: str, local_vars: dict) -> tuple[bool, str]:
     if not safe:
         return False, f"Security block: {reason}"
     try:
-        exec(code, {"__builtins__": SAFE_BUILTINS}, local_vars)
+        # ONE namespace for globals and locals. With two separate dicts,
+        # Python resolves names inside comprehensions, lambdas and nested
+        # functions against the globals dict only, so ordinary code like
+        #   [c for c in df.columns if np.issubdtype(df[c].dtype, np.number)]
+        # failed with "name 'np' is not defined". The namespace still only
+        # holds the proxied df/pd/np/px objects plus SAFE_BUILTINS, so this
+        # exposes nothing new. (Found by the held-out eval.)
+        local_vars["__builtins__"] = SAFE_BUILTINS
+        exec(code, local_vars)
         return True, ""
     except Exception as e:
         return False, str(e)

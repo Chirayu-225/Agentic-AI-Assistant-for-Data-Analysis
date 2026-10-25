@@ -128,19 +128,21 @@ def run_cleaning_tests(verbose=False):
     # Percentages
     df = pd.DataFrame({"rate": ["85%", "90%", "75%", "88%", "92%"]})
     c, _ = rule_based_clean(df)
-    passed = pd.api.types.is_numeric_dtype(c["rate"]) and c["rate"].max() <= 1.0
-    results.append(R("Cleaning: percentage conversion (÷100)", passed,
+    # Kept in percent points (85% -> 85), the unit the file used.
+    passed = pd.api.types.is_numeric_dtype(c["rate"]) and c["rate"].tolist() == [85, 90, 75, 88, 92]
+    results.append(R("Cleaning: percentage conversion (percent points)", passed,
                      f"dtype={c['rate'].dtype}, max={c['rate'].max()}"))
 
-    # Sentinel nulls — should be detected AND filled (zero nulls remain)
-    df = pd.DataFrame({"score": ["85", "N/A", "none", "90", "--", "88", "na", "null"]})
+    # Sentinel nulls ("N/A", "none", "--") are recognised as missing and
+    # left missing — never replaced with an invented value.
+    df = pd.DataFrame({"student": list("ABCDEFGH"),
+                       "score": ["85", "N/A", "none", "90", "--", "88", "na", "null"]})
     c, log = rule_based_clean(df)
     null_count = c["score"].isnull().sum()
-    was_detected = any("sentinel" in l.lower() for l in log)
-    was_filled   = any("filled" in l.lower() for l in log)
-    passed = null_count == 0 and was_detected and was_filled
-    results.append(R("Cleaning: sentinel nulls detected and filled", passed,
-                     f"nulls={null_count} (expected 0), detected={was_detected}, filled={was_filled}"))
+    reported = any("missing value" in l.lower() for l in log)
+    passed = pd.api.types.is_numeric_dtype(c["score"]) and null_count == 5 and reported
+    results.append(R("Cleaning: sentinel nulls recognised as missing", passed,
+                     f"nulls={null_count} (expected 5), reported={reported}"))
 
     # Duplicate removal
     df = pd.DataFrame({"a": [1, 2, 2, 3], "b": ["x", "y", "y", "z"]})
@@ -170,22 +172,22 @@ def run_cleaning_tests(verbose=False):
     results.append(R("Cleaning: thousands separator removal", passed,
                      f"dtype={c['rev'].dtype}, values={c['rev'].tolist()}"))
 
-    # Null filling — numeric gets median, categorical gets 'Unknown', zero nulls remain
+    # Missing text is left missing, not turned into a fake 'Unknown' category
     df = pd.DataFrame({"val": [1.0, 2.0, 3.0], "name": ["a", None, "c"]})
     c, log = rule_based_clean(df)
     null_count = c["name"].isnull().sum()
-    filled_correctly = (null_count == 0) and (c["name"].iloc[1] == "Unknown")
-    results.append(R("Cleaning: nulls filled (not left dangling)", filled_correctly,
-                     f"nulls={null_count} (expected 0), filled_value='{c['name'].iloc[1]}'"))
+    passed = null_count == 1 and "Unknown" not in set(c["name"].dropna())
+    results.append(R("Cleaning: missing text not invented", passed,
+                     f"nulls={null_count} (expected 1), values={c['name'].tolist()}"))
 
-    # All-numeric nulls get filled with median, not dropped or left as NaN
-    df = pd.DataFrame({"price": [100.0, None, 300.0, None, 500.0]})
+    # Missing numbers are left missing (no median fill) and reported, so
+    # averages and counts reflect only real values
+    df = pd.DataFrame({"item": ["a", "b", "c", "d", "e"], "price": [100.0, None, 300.0, None, 500.0]})
     c, log = rule_based_clean(df)
     null_count = c["price"].isnull().sum()
-    expected_median = 300.0  # median of [100, 300, 500]
-    passed = null_count == 0 and abs(c["price"].iloc[1] - expected_median) < 0.01
-    results.append(R("Cleaning: numeric nulls filled with median", passed,
-                     f"nulls={null_count}, filled_value={c['price'].iloc[1]} (expected {expected_median})"))
+    passed = null_count == 2 and c["price"].mean() == 300.0 and any("missing value" in l for l in log)
+    results.append(R("Cleaning: missing numbers not invented", passed,
+                     f"nulls={null_count} (expected 2), mean={c['price'].mean()} (expected 300.0)"))
 
     return results
 

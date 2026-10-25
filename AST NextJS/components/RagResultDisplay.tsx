@@ -1,9 +1,33 @@
 "use client";
 
+import type { RagSource } from "@/lib/pythonClient";
+
 interface RagResultDisplayProps {
   kind: "answer" | "insights";
   text?: string;
   error?: string;
+  sources?: RagSource[];
+}
+
+function Sources({ sources }: { sources: RagSource[] }) {
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <p className="font-mono text-[11px] text-muted tracking-widest mb-2">
+        SOURCE PASSAGES ({sources.length})
+      </p>
+      <div className="flex flex-col gap-2">
+        {sources.map((s) => (
+          <details key={s.passage} className="border border-border rounded-md bg-base px-3 py-2">
+            <summary className="font-mono text-xs text-accent cursor-pointer">
+              Passage {s.passage}
+              <span className="text-muted"> — {s.text.slice(0, 90)}{s.text.length > 90 ? "…" : ""}</span>
+            </summary>
+            <p className="text-text text-xs leading-relaxed mt-2 whitespace-pre-wrap">{s.text}</p>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // Insights come back formatted as "1• finding → implication" per line,
@@ -50,7 +74,7 @@ function InsightLines({ text }: { text: string }) {
   );
 }
 
-export default function RagResultDisplay({ kind, text, error }: RagResultDisplayProps) {
+export default function RagResultDisplay({ kind, text, error, sources }: RagResultDisplayProps) {
   if (error || !text) {
     return (
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
@@ -70,6 +94,7 @@ export default function RagResultDisplay({ kind, text, error }: RagResultDisplay
       ) : (
         <p className="text-text text-base leading-relaxed whitespace-pre-wrap">{text}</p>
       )}
+      {kind === "answer" && sources && sources.length > 0 && <Sources sources={sources} />}
     </div>
   );
 }

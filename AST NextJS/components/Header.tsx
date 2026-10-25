@@ -11,26 +11,22 @@ function Badge({ label }: { label: string }) {
 }
 
 export default function Header() {
-  const now = new Date();
-  const dateLabel = now.toISOString().slice(0, 10);
-  const timeLabel = now.toISOString().slice(11, 16);
-
   return (
     <header className="mb-8">
       <p className="font-mono text-xs text-accent tracking-widest mb-2">
-        // SECURE ANALYTICS TERMINAL
+        // FOR FINANCE &amp; OPERATIONS ANALYSTS
       </p>
       <h1 className="text-4xl font-bold tracking-tight">
         ANALYST<span className="text-accent">_</span>ASSISTANT
       </h1>
       <p className="text-muted mt-1 mb-4">
-        AI-Powered Data Intelligence System — Local Inference Engine
+        Verified answers from your spreadsheets. Every number is computed from your data, and you can see exactly how.
       </p>
 
       <div className="flex flex-wrap gap-3">
-        <Badge label="SYSTEM NOMINAL" />
-        <Badge label="LLM READY" />
-        <Badge label={`${dateLabel} // ${timeLabel} UTC`} />
+        <Badge label="EVERY NUMBER COMPUTED" />
+        <Badge label="CODE SHOWN FOR EVERY ANSWER" />
+        <Badge label="PERSONAL COLUMNS WITHHELD FROM THE AI" />
       </div>
     </header>
   );

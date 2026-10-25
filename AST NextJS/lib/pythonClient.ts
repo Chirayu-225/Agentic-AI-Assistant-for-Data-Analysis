@@ -65,7 +65,13 @@ export interface AnalyzeResponse {
   resultType: "table" | "scalar" | "chart" | "error";
   resultData: unknown; // shape depends on resultType — table rows, a number/string, or a Plotly figure JSON
   error?: string;
-  confidence?: "HIGH" | "MEDIUM" | "LOW";
+  // How the answer was produced — replaces the old HIGH/MEDIUM/LOW
+  // "confidence", which only measured whether code ran, not correctness.
+  code?: string;
+  method?: "shortcut" | "generated_python" | "generated_sql";
+  basis?: string;
+  rowsAnalyzed?: number | null;
+  resultRows?: number | null;
 }
 
 export interface RagIndexRequest {
@@ -101,9 +107,16 @@ export interface RagQueryRequest {
   query: string;
 }
 
+export interface RagSource {
+  passage: number;
+  text: string;
+  distance?: number | null;
+}
+
 export interface RagQueryResponse {
   success: boolean;
   answer?: string;
+  sources?: RagSource[];
   error?: string;
 }
 
@@ -402,6 +415,12 @@ export interface AutoAnalyzeRequest {
 export interface AutoAnalyzeInsight {
   finding: string;
   action: string;
+  // Present on verified insights: the question asked of the data, the
+  // code that computed the evidence, and the computed result itself.
+  question?: string;
+  code?: string;
+  evidence?: string;
+  verified?: boolean;
 }
 
 export interface AutoAnalyzeChart {
@@ -410,12 +429,14 @@ export interface AutoAnalyzeChart {
   resultType: "chart" | "error";
   resultData: unknown; // Plotly figure JSON when resultType is "chart"
   error?: string | null;
+  code?: string;
 }
 
 export interface AutoAnalyzeResponse {
   success: boolean;
   filename?: string;
   insights?: AutoAnalyzeInsight[];
+  droppedUnverified?: number;
   charts?: AutoAnalyzeChart[];
   chartsError?: string | null;
   error?: string;
@@ -490,6 +511,7 @@ export interface MultiTableQueryRequest {
 export interface MultiTableQueryResponse {
   success: boolean;
   reasoning?: string;
+  code?: string;
   tables?: string[];
   resultType?: "table";
   resultData?: Record<string, unknown>[];

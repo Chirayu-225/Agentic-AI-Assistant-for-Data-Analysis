@@ -2,20 +2,20 @@
 
 const CAPABILITIES = [
   {
-    title: "Statistical Analysis",
-    description: "Correlations, distributions, descriptive stats, outlier detection",
+    title: "Ask in plain English",
+    description: "Totals, breakdowns, rankings, filters and charts — answered by code run on your file",
   },
   {
-    title: "Data Filtering & Aggregation",
-    description: "Group by, filter, sort, pivot — all via natural language",
+    title: "Clean messy exports",
+    description: "Currency symbols, spelling variants and total rows fixed only after you opt in",
   },
   {
-    title: "Pattern Recognition",
-    description: "Trends, seasonality, anomaly identification across dimensions",
+    title: "Verified insights",
+    description: "Auto-Analyze shows a finding only if every number in it matches a computation",
   },
   {
-    title: "Code Generation & Execution",
-    description: "Auto-generates pandas code, runs it in a sandboxed process, surfaces results",
+    title: "Show the work",
+    description: "Open “How this was computed” on any answer to see the exact code and result",
   },
 ];
 
