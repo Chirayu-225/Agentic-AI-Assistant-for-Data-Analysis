@@ -687,7 +687,8 @@ Hard rules:
   "steadily", "always", "every month") — one result can't show that.
 {currency_rule}
 - Write ratios and growth rates as percentages ("47.8%"), never as raw
-  decimals ("0.478", "-1.000"). Never mention NaN/None/null values or
+  decimals ("0.478", "-1.000"). Round percentages to one decimal place
+  ("29.3%", not "29.279385%") and other figures to at most two decimals. Never mention NaN/None/null values or
   data-quality artefacts unless they change a business conclusion.
 - If a result is empty, trivial or not decision-relevant, skip that item.
 - If the result reveals a data-quality caveat (tiny sample, many missing
