@@ -31,57 +31,65 @@ import pandas as pd
 from multi_table_service import sanitize_alias, _find_likely_join_keys, _parse_sql_response, _records
 from sandbox_limits import run_sql_sandboxed
 
-print("=" * 70)
-print("PART 0 — result-size cap (MAX_RESULT_ROWS) — a join can fan out")
-print("well past either input table's row count, so this matters here")
-print("at least as much as on the single-dataset path")
-print("=" * 70)
 
-big_join_result = pd.DataFrame({"n": range(9000)})
-capped_records, total_rows, was_truncated = _records(big_join_result, max_rows=5000)
-assert len(capped_records) == 5000, f"expected exactly 5000 records, got {len(capped_records)}"
-assert total_rows == 9000, f"total should reflect the FULL uncapped row count, got {total_rows}"
-assert was_truncated is True
-small_result = pd.DataFrame({"n": range(3)})
-small_records, small_total, small_truncated = _records(small_result, max_rows=5000)
-assert len(small_records) == 3 and small_total == 3 and small_truncated is False
-print(f"[OK] a 9,000-row join result caps to {len(capped_records)} records "
-      f"(totalRowCount={total_rows}, truncated={was_truncated}); "
-      f"a small result is left untouched and correctly reports truncated=False")
+def main():
+    # Guarded: on Windows the sandbox starts its worker with "spawn", which
+    # re-imports this file; without the guard the whole test re-ran inside
+    # the worker, tried to start another worker there, and failed with
+    # "An attempt has been made to start a new process before the current
+    # process has finished its bootstrapping phase".
 
-print("\n" + "=" * 70)
-print("PART 1 — alias sanitization")
-print("=" * 70)
+    print("=" * 70)
+    print("PART 0 — result-size cap (MAX_RESULT_ROWS) — a join can fan out")
+    print("well past either input table's row count, so this matters here")
+    print("at least as much as on the single-dataset path")
+    print("=" * 70)
 
-cases = [
-    ("Orders 2024!", "fallback", "orders_2024"),
-    ("123abc", "fallback", "t_123abc"),
-    ("", "fallback", "fallback"),
-    ("customer-data.csv", "fallback", "customer_data_csv"),
-]
-for raw, fallback, expected in cases:
-    result = sanitize_alias(raw, fallback)
-    status = "OK" if result == expected else f"MISMATCH (got {result!r})"
-    print(f"  {raw!r} -> {result!r}  [{status}]")
-    assert result == expected, f"sanitize_alias({raw!r}) expected {expected!r}, got {result!r}"
-print("[OK] aliases are always safe SQL identifiers regardless of input")
+    big_join_result = pd.DataFrame({"n": range(9000)})
+    capped_records, total_rows, was_truncated = _records(big_join_result, max_rows=5000)
+    assert len(capped_records) == 5000, f"expected exactly 5000 records, got {len(capped_records)}"
+    assert total_rows == 9000, f"total should reflect the FULL uncapped row count, got {total_rows}"
+    assert was_truncated is True
+    small_result = pd.DataFrame({"n": range(3)})
+    small_records, small_total, small_truncated = _records(small_result, max_rows=5000)
+    assert len(small_records) == 3 and small_total == 3 and small_truncated is False
+    print(f"[OK] a 9,000-row join result caps to {len(capped_records)} records "
+          f"(totalRowCount={total_rows}, truncated={was_truncated}); "
+          f"a small result is left untouched and correctly reports truncated=False")
 
-print("\n" + "=" * 70)
-print("PART 2 — likely join-key detection (a hint, not a decision)")
-print("=" * 70)
+    print("\n" + "=" * 70)
+    print("PART 1 — alias sanitization")
+    print("=" * 70)
 
-orders = pd.DataFrame({"order_id": [1], "customer_id": [10], "amount": [100]})
-customers = pd.DataFrame({"customer_id": [10], "name": ["Alice"]})
-hints = _find_likely_join_keys({"orders": orders, "customers": customers})
-print(" ", hints)
-assert any("customer_id" in h for h in hints)
-print("[OK] shared column names across tables are surfaced as join-key hints")
+    cases = [
+        ("Orders 2024!", "fallback", "orders_2024"),
+        ("123abc", "fallback", "t_123abc"),
+        ("", "fallback", "fallback"),
+        ("customer-data.csv", "fallback", "customer_data_csv"),
+    ]
+    for raw, fallback, expected in cases:
+        result = sanitize_alias(raw, fallback)
+        status = "OK" if result == expected else f"MISMATCH (got {result!r})"
+        print(f"  {raw!r} -> {result!r}  [{status}]")
+        assert result == expected, f"sanitize_alias({raw!r}) expected {expected!r}, got {result!r}"
+    print("[OK] aliases are always safe SQL identifiers regardless of input")
 
-print("\n" + "=" * 70)
-print("PART 3 — REASONING + ```python block response parsing")
-print("=" * 70)
+    print("\n" + "=" * 70)
+    print("PART 2 — likely join-key detection (a hint, not a decision)")
+    print("=" * 70)
 
-raw_response = """REASONING: Joining orders and customers on customer_id.
+    orders = pd.DataFrame({"order_id": [1], "customer_id": [10], "amount": [100]})
+    customers = pd.DataFrame({"customer_id": [10], "name": ["Alice"]})
+    hints = _find_likely_join_keys({"orders": orders, "customers": customers})
+    print(" ", hints)
+    assert any("customer_id" in h for h in hints)
+    print("[OK] shared column names across tables are surfaced as join-key hints")
+
+    print("\n" + "=" * 70)
+    print("PART 3 — REASONING + ```python block response parsing")
+    print("=" * 70)
+
+    raw_response = """REASONING: Joining orders and customers on customer_id.
 
 ```python
 result = con.sql(\"\"\"
@@ -90,17 +98,17 @@ result = con.sql(\"\"\"
     GROUP BY c.name
 \"\"\").df()
 ```"""
-reasoning, code = _parse_sql_response(raw_response)
-print("  reasoning:", reasoning)
-assert reasoning == "Joining orders and customers on customer_id."
-assert "con.sql" in code
-print("[OK] reasoning and code correctly split")
+    reasoning, code = _parse_sql_response(raw_response)
+    print("  reasoning:", reasoning)
+    assert reasoning == "Joining orders and customers on customer_id."
+    assert "con.sql" in code
+    print("[OK] reasoning and code correctly split")
 
-print("\n" + "=" * 70)
-print("PART 4 — a REAL join, through the REAL sandboxed subprocess")
-print("=" * 70)
+    print("\n" + "=" * 70)
+    print("PART 4 — a REAL join, through the REAL sandboxed subprocess")
+    print("=" * 70)
 
-join_code = """
+    join_code = """
 result = con.sql(\"\"\"
     SELECT c.name, SUM(o.amount) as total_spent
     FROM orders o JOIN customers c ON o.customer_id = c.customer_id
@@ -108,46 +116,46 @@ result = con.sql(\"\"\"
     ORDER BY total_spent DESC
 \"\"\").df()
 """
-sbr = run_sql_sandboxed(join_code, {"orders": orders, "customers": customers})
-print(f"\nsuccess={sbr.success}")
-if sbr.success:
-    print(sbr.value)
-assert sbr.success, f"real join should succeed: {sbr.error}"
-assert list(sbr.value["name"]) == ["Alice"]
-print("[OK] real join executes correctly end-to-end through the actual sandbox subprocess")
+    sbr = run_sql_sandboxed(join_code, {"orders": orders, "customers": customers})
+    print(f"\nsuccess={sbr.success}")
+    if sbr.success:
+        print(sbr.value)
+    assert sbr.success, f"real join should succeed: {sbr.error}"
+    assert list(sbr.value["name"]) == ["Alice"]
+    print("[OK] real join executes correctly end-to-end through the actual sandbox subprocess")
 
-print("\n" + "=" * 70)
-print("PART 5 — three attack vectors, three different layers catching each")
-print("=" * 70)
+    print("\n" + "=" * 70)
+    print("PART 5 — three attack vectors, three different layers catching each")
+    print("=" * 70)
 
-attacks = {
-    "malicious SQL text (read local file)": (
-        'result = con.sql("SELECT * FROM read_csv(\'/etc/passwd\')").df()',
-        "Permission",  # DuckDB's own enable_external_access error
-    ),
-    ".connect() bypass attempt": (
-        "raw_con = con.connect()\nresult = raw_con.sql('SELECT 1').df()",
-        "blocked in the sandbox",  # SafeDuckDBConnection's attribute allowlist
-    ),
-    "raw import duckdb bypass attempt": (
-        "import duckdb\nraw = duckdb.connect()\nresult = raw.sql('SELECT 1').df()",
-        "import 'duckdb' blocked",  # sandbox.py's existing AST-level import ban
-    ),
-}
-for name, (code, expected_fragment) in attacks.items():
-    sbr = run_sql_sandboxed(code, {"orders": orders})
-    print(f"\n  {name}:")
-    print(f"    success={sbr.success} | error={sbr.error}")
-    assert not sbr.success, f"{name} should have been blocked but succeeded!"
-    assert expected_fragment in sbr.error, f"{name}: expected '{expected_fragment}' in error, got: {sbr.error}"
-print("\n[OK] all 3 attack vectors blocked, each by the expected distinct layer")
+    attacks = {
+        "malicious SQL text (read local file)": (
+            'result = con.sql("SELECT * FROM read_csv(\'/etc/passwd\')").df()',
+            "Permission",  # DuckDB's own enable_external_access error
+        ),
+        ".connect() bypass attempt": (
+            "raw_con = con.connect()\nresult = raw_con.sql('SELECT 1').df()",
+            "blocked in the sandbox",  # SafeDuckDBConnection's attribute allowlist
+        ),
+        "raw import duckdb bypass attempt": (
+            "import duckdb\nraw = duckdb.connect()\nresult = raw.sql('SELECT 1').df()",
+            "import 'duckdb' blocked",  # sandbox.py's existing AST-level import ban
+        ),
+    }
+    for name, (code, expected_fragment) in attacks.items():
+        sbr = run_sql_sandboxed(code, {"orders": orders})
+        print(f"\n  {name}:")
+        print(f"    success={sbr.success} | error={sbr.error}")
+        assert not sbr.success, f"{name} should have been blocked but succeeded!"
+        assert expected_fragment in sbr.error, f"{name}: expected '{expected_fragment}' in error, got: {sbr.error}"
+    print("\n[OK] all 3 attack vectors blocked, each by the expected distinct layer")
 
-print("\n" + "=" * 70)
-print("PART 6 — real end-to-end run_multi_table_query (mocked LLM only —")
-print("everything downstream of the LLM call is real)")
-print("=" * 70)
-print("On your machine, with GROQ_API_KEY set, try something like:")
-print("""
+    print("\n" + "=" * 70)
+    print("PART 6 — real end-to-end run_multi_table_query (mocked LLM only —")
+    print("everything downstream of the LLM call is real)")
+    print("=" * 70)
+    print("On your machine, with GROQ_API_KEY set, try something like:")
+    print("""
     from multi_table_service import run_multi_table_query
     with open("orders.csv", "rb") as f: orders_bytes = f.read()
     with open("customers.csv", "rb") as f: customers_bytes = f.read()
@@ -163,5 +171,9 @@ print("""
     print(result["resultData"])  # real joined/aggregated rows
 """)
 
-print("=" * 70)
-print("Done.")
+    print("=" * 70)
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

@@ -509,7 +509,11 @@ def build_defect_fix_prompt(defects: list[dict], schema_text: str) -> str:
         "```\n\n"
         "Rules: only use pandas/numpy operations already available as "
         "df/pd/np. No imports. No print(). Only touch columns relevant "
-        "to the defects listed above."
+        "to the defects listed above. Keep the code SHORT (under 40 lines): "
+        "for a column with many variants, normalise with string methods and "
+        "map only the variants named in the defect — never write one mapping "
+        "entry per distinct value. Don't drop columns or rows; if a column is "
+        "mostly empty, leave it as-is and note that in REASONING."
     )
     return "\n".join(lines)
 
@@ -547,7 +551,10 @@ think like an analyst would: what 2-3 different angles in the data
 (e.g. price per unit, average order size, regional/customer
 concentration, time trend) might help explain the pattern, even
 partially? Write UP TO 3 short, SEPARATE python snippets, each in its
-own ```python code block, each computing ONE specific angle. Each
+own ```python code block, each computing ONE specific angle. Put a line
+`ANGLE: <what this computes, in plain words>` directly above each code
+block (e.g. `ANGLE: average order value by product line`) — the answer
+step only knows what a number means from this label. Each
 snippet runs independently — assign each one's output to a variable
 named `result` (not result_1/result_2 — each block gets its own fresh
 run, so reusing the same name each time is correct, not a conflict).
@@ -566,7 +573,8 @@ column names from the list above.
 """
 
 
-def build_followup_answer_prompt(insights_text: str, prior_qa_text: str, computed_facts: list[str], question: str) -> str:
+def build_followup_answer_prompt(insights_text: str, prior_qa_text: str, computed_facts: list,
+                                 question: str, currencies: dict | None = None) -> str:
     """Second step: compose the actual answer. Grounded in three things,
     in order of trust — real sandbox-computed values (if step one
     produced any — now possibly several, one per angle explored), the
@@ -576,11 +584,41 @@ def build_followup_answer_prompt(insights_text: str, prior_qa_text: str, compute
     know rather than filling the gap with something plausible-sounding."""
     computed_block = ""
     if computed_facts:
-        facts_joined = "\n\n".join(f"Angle {i+1}:\n{f}" for i, f in enumerate(computed_facts))
-        computed_block = f"\nTo help answer this, the following was just computed from the real data:\n{facts_joined}\n"
+        # Each fact is (label, value). The label says what was measured, so
+        # the answer can say "average order value by line" instead of
+        # "Angle 1 (87.34)" — an earlier version sent unlabelled numbers and
+        # the model could only report that it didn't know what they meant.
+        parts = []
+        for f in computed_facts:
+            label, value = f if isinstance(f, tuple) else ("additional computation", f)
+            parts.append(f"WHAT WAS MEASURED: {label}\n{value}")
+        computed_block = ("\nTo help answer this, the following was just computed from the real data:\n"
+                          + "\n\n".join(parts) + "\n")
+    if currencies:
+        money = "; ".join(f"'{c}' is in {label}" for c, label in currencies.items())
+        currency_rule = f"- Money in this dataset: {money}. Use that currency symbol, never another."
+    else:
+        currency_rule = "- No currency appears in this dataset: write money-like figures as plain numbers, no currency symbol."
     return f"""You are answering a follow-up question about a business
-analysis you already ran, in a short conversational reply — 3-5
-sentences unless the question genuinely needs more.
+analysis you already ran.
+
+FORMAT — short and scannable, never one long paragraph:
+**<one sentence that directly answers the question>**
+
+**What the data shows**
+- <one line per finding, each with its number>  (2-4 bullets)
+
+**What it can't tell us**
+- <one line per gap>  (only if there is a real gap; at most 2 bullets)
+
+**To find out**
+- <one line per extra data source that would help>  (only if needed; at most 2 bullets)
+
+Rules for the format: under 120 words in total; every bullet is one line;
+refer to computations by what they measured (e.g. "average order value
+by product line"), never as "Angle 1" or by a bare number; skip any
+section that would be empty.
+{currency_rule}
 
 Business insights already identified:
 {insights_text}

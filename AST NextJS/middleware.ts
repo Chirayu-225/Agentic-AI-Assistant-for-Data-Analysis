@@ -40,6 +40,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except the gate itself, Next.js internals and static files.
-  matcher: ["/((?!access|api/access|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the gate itself, Next.js internals, the tab icon and static files —
+  // and /api/upload. Next.js copies a request body for middleware with a
+  // 10 MB limit (middlewareClientMaxBodySize) and TRUNCATES anything larger,
+  // so an 18 MB .xlsx reached the backend cut in half ("File is not a zip
+  // file") and a big CSV would silently lose rows. The upload route checks
+  // the access cookie itself instead (app/api/upload/route.ts).
+  matcher: ["/((?!access|api/access|api/upload|_next/static|_next/image|favicon.ico|icon.svg).*)"],
 };

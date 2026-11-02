@@ -42,6 +42,11 @@ for q in ["What is the total pts for Mumbai?",
           "total pts where pts above 2"]:
     check(f"no shortcut: {q!r}", detect_shortcut(q, df) is None, detect_shortcut(q, df) or "")
 
+codes = pd.DataFrame({"country": ["UK", "US", "UK", "IN"], "state": ["CA", "NY", "CA", "TX"], "sales": [10, 20, 30, 40]})
+for q in ["What is the total sales for UK?", "total sales in CA", "average sales for NY"]:
+    check(f"2-letter code blocks the shortcut: {q!r}", detect_shortcut(q, codes) is None, detect_shortcut(q, codes) or "")
+check("plain whole-column question still uses it", "sum()" in (detect_shortcut("What is the total sales?", codes) or ""))
+
 print("\nPART 3 — schema carries exact value spellings, not personal data")
 desc = describe_schema(df)
 check("text values listed exactly", "'League'" in desc and "'Playoff'" in desc, desc)

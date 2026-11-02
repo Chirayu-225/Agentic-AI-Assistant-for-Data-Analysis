@@ -44,3 +44,17 @@ export function safeEqual(a: string, b: string): boolean {
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
+
+/** For route handlers the middleware deliberately skips (see middleware.ts
+ * matcher). Returns null when the request may proceed, or an error message
+ * plus status when it may not. */
+export async function checkAccess(cookieValue: string | undefined): Promise<{ error: string; status: number } | null> {
+  const mode = gateMode();
+  if (mode === "off") return null;
+  if (mode === "misconfigured") {
+    return { error: "Access is locked: ACCESS_CODE is not configured on the server.", status: 503 };
+  }
+  const expected = await tokenFor(configuredAccessCode());
+  if (cookieValue && safeEqual(cookieValue, expected)) return null;
+  return { error: "Access code required. Reload the page to sign in.", status: 401 };
+}

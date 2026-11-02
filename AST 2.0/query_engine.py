@@ -52,7 +52,13 @@ def _has_filter_intent(q: str, df: pd.DataFrame) -> bool:
             continue  # free text / IDs — matching their words would be noise
         for v in values.unique():
             v_low = v.strip().lower()
-            if len(v_low) >= 3 and v_low not in col_words and (
+            # Whole-word match, down to 2 characters: country/state codes
+            # ("UK", "CA", "NY") are exactly the short values that matter —
+            # "total sales for UK" used to return the grand total because
+            # values under 3 characters were ignored (found in review).
+            # A false positive only means the question goes to the full
+            # pipeline instead of a shortcut, so erring this way is safe.
+            if len(v_low) >= 2 and v_low not in col_words and (
                 v_low in q_words or (" " in v_low and v_low in q)
             ):
                 return True
@@ -378,8 +384,9 @@ Output ONLY the corrected Python code block. No explanations.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def llm_with_fallback(prompt_text: str, temperature: float = 0.1,
-                      primary: str = "openai/gpt-oss-20b", session_id: str = "") -> str:
-    return llm_code_call(prompt_text, temperature, session_id=session_id)
+                      primary: str = "openai/gpt-oss-20b", session_id: str = "",
+                      max_tokens: int = 2048) -> str:
+    return llm_code_call(prompt_text, temperature, session_id=session_id, max_tokens=max_tokens)
 
 
 def insight_llm(prompt_text: str, temperature: float = 0.3) -> str:

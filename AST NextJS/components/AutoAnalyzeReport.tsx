@@ -5,6 +5,7 @@ import type { AutoAnalyzeResponse, AutoAnalyzeChart, FollowUpQaPair, FollowUpRes
 import { getOrCreateSessionId } from "@/lib/sessionId";
 import { Plot, CHART_COLORS, themeTraces } from "@/components/ResultDisplay";
 import ShowWork from "@/components/ShowWork";
+import MiniMarkdown from "@/components/MiniMarkdown";
 
 function ChartPanel({
   chart,
@@ -117,8 +118,8 @@ function FollowUpSection({
         <div className="flex flex-col gap-3 mb-3">
           {qaHistory.map((qa, i) => (
             <div key={i} className="border border-border rounded-lg bg-panel p-3">
-              <p className="font-mono text-xs text-text mb-1">Q: {qa.question}</p>
-              <p className="text-muted text-sm">{qa.answer}</p>
+              <p className="font-mono text-xs text-text mb-2">Q: {qa.question}</p>
+              <MiniMarkdown text={qa.answer} className="text-muted text-sm leading-relaxed" />
             </div>
           ))}
         </div>

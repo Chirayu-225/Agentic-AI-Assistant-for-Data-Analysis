@@ -232,6 +232,7 @@ python eval_heldout.py                  # pooled accuracy + interval across all 
 python eval_heldout.py --repeat 3       # plus consistency
 python eval_insights.py                 # verified insights shown, drop rate, independent re-check
 python eval_rag.py                      # document Q&A: cites a passage, grounded, refuses unanswerables
+python eval_joins.py --repeat 3         # Join Datasets: SQL accuracy incl. fan-out/orphan traps + consistency
 ```
 
 ## Known Limitations

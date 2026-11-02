@@ -272,7 +272,8 @@ export interface UploadResult {
 
 export async function uploadToPython(
   body: ReadableStream<Uint8Array> | Uint8Array,
-  filename: string
+  filename: string,
+  declaredSize?: string
 ): Promise<UploadResult> {
   const init: RequestInit & { duplex?: "half" } = {
     method: "POST",
@@ -280,6 +281,8 @@ export async function uploadToPython(
       "Content-Type": "application/octet-stream",
       "X-Service-Secret": PYTHON_SERVICE_SECRET ?? "",
       "X-Filename": encodeURIComponent(filename),
+      // The browser's own file.size, so the backend can reject a truncated upload.
+      ...(declaredSize && /^\d+$/.test(declaredSize) ? { "X-File-Size": declaredSize } : {}),
     },
     body: body as BodyInit,
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
@@ -508,10 +511,27 @@ export interface MultiTableQueryRequest {
   sessionId: string;
 }
 
+export interface TableRelationships {
+  links: {
+    a: string;
+    b: string;
+    on: string[];
+    kind?: string; // one-to-one | one-to-many | many-to-one | many-to-many | unknown (...)
+    orphansInA?: number | null;
+    orphansInB?: number | null;
+    typeMismatch?: boolean;
+  }[];
+  groups: string[][];
+  allConnected: boolean;
+  unlinked: { table: string; idColumns: string[] }[];
+}
+
 export interface MultiTableQueryResponse {
   success: boolean;
   reasoning?: string;
   code?: string;
+  relationships?: TableRelationships;
+  notes?: string[];
   tables?: string[];
   resultType?: "table";
   resultData?: Record<string, unknown>[];

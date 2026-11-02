@@ -49,6 +49,16 @@ _CHAT_MODEL = os.environ.get("GROQ_CHAT_MODEL", "openai/gpt-oss-120b")
 
 _client = None
 
+# Whether the most recent model call on this thread stopped because it hit
+# its token budget (finish_reason == "length"). A cut-off answer must never
+# be cached: code generation that ran out of room is missing its closing
+# lines, and caching it made "try again" return the same broken answer.
+_tls = threading.local()
+
+
+def last_call_truncated() -> bool:
+    return bool(getattr(_tls, "truncated", False))
+
 
 def _get_client():
     """Return a cached Groq client. Raises a clear error if the key is missing."""
@@ -84,6 +94,9 @@ def _call_groq(prompt: str, temperature: float, model: str, max_tokens: int) -> 
     )
     choice = resp.choices[0]
     text = choice.message.content or ""
+    _tls.truncated = choice.finish_reason == "length"
+    if _tls.truncated:
+        print(f"[llm] answer from {model} hit max_tokens={max_tokens} and was cut off", flush=True)
     if not text.strip():
         print(f"[llm] empty answer from {model} (finish_reason={choice.finish_reason}, "
               f"max_tokens={max_tokens})", flush=True)
@@ -113,7 +126,9 @@ def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) 
         timeout=90,
     )
     resp.raise_for_status()
-    text = (resp.json()["choices"][0]["message"].get("content") or "")
+    choice = resp.json()["choices"][0]
+    _tls.truncated = choice.get("finish_reason") == "length"
+    text = (choice["message"].get("content") or "")
     if not text.strip():
         raise RuntimeError(f"Fallback model {model} returned an empty answer.")
     return text
@@ -226,29 +241,33 @@ _cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
 _cache_lock = threading.Lock()
 
 
-def _cache_key(model: str, prompt: str, temperature: float, session_id: str) -> str:
+def _cache_key(model: str, prompt: str, temperature: float, session_id: str, max_tokens: int = 2048) -> str:
     h = hashlib.sha256()
-    for part in (model, f"{temperature:.3f}", session_id, prompt):
+    for part in (model, f"{temperature:.3f}", session_id, str(max_tokens), prompt):
         h.update(part.encode("utf-8"))
         h.update(b"\x00")
     return h.hexdigest()
 
 
-def cached_llm_call(model: str, prompt_text: str, temperature: float, session_id: str = "") -> str:
+def cached_llm_call(model: str, prompt_text: str, temperature: float, session_id: str = "",
+                    max_tokens: int = 2048) -> str:
     """Identical (model, prompt, temperature, session_id) returns the cached
     answer for up to an hour. session_id is part of the key so two users
     asking the same question on identically-shaped data never receive each
     other's generated code. Set CACHE_ENABLED=0 to bypass."""
     if os.environ.get("CACHE_ENABLED", "1") == "0":
-        return _call(prompt_text, temperature, model)
-    key = _cache_key(model, prompt_text, temperature, session_id)
+        return _call(prompt_text, temperature, model, max_tokens)
+    key = _cache_key(model, prompt_text, temperature, session_id, max_tokens)
     now = time.time()
     with _cache_lock:
         hit = _cache.get(key)
         if hit and now - hit[0] < _CACHE_TTL_SECONDS:
             _cache.move_to_end(key)
             return hit[1]
-    text = _call(prompt_text, temperature, model)
+    _tls.truncated = False
+    text = _call(prompt_text, temperature, model, max_tokens)
+    if last_call_truncated():
+        return text  # never cache an answer that was cut off
     with _cache_lock:
         _cache[key] = (now, text)
         _cache.move_to_end(key)
@@ -257,10 +276,11 @@ def cached_llm_call(model: str, prompt_text: str, temperature: float, session_id
     return text
 
 
-def llm_code_call(prompt_text: str, temperature: float = 0.1, session_id: str = "") -> str:
+def llm_code_call(prompt_text: str, temperature: float = 0.1, session_id: str = "",
+                  max_tokens: int = 2048) -> str:
     """Code generation (analysis, cleaning, retry). Cached per session."""
     try:
-        return cached_llm_call(_CODE_MODEL, prompt_text, temperature, session_id)
+        return cached_llm_call(_CODE_MODEL, prompt_text, temperature, session_id, max_tokens)
     except Exception as e:
         raise RuntimeError(f"LLM code call failed: {e}") from e
 
@@ -273,10 +293,10 @@ def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
         raise RuntimeError(f"LLM chat call failed: {e}") from e
 
 
-def llm_uncached_code_call(prompt_text: str, temperature: float = 0.0) -> str:
+def llm_uncached_code_call(prompt_text: str, temperature: float = 0.0, max_tokens: int = 2048) -> str:
     """One-shot code calls that must NOT be cached (cleaning retry, error retry)."""
     try:
-        return _call(prompt_text, temperature, _CODE_MODEL)
+        return _call(prompt_text, temperature, _CODE_MODEL, max_tokens)
     except Exception as e:
         raise RuntimeError(f"LLM uncached code call failed: {e}") from e
 

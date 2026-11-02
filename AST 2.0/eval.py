@@ -144,11 +144,14 @@ def run_cleaning_tests(verbose=False):
     results.append(R("Cleaning: sentinel nulls recognised as missing", passed,
                      f"nulls={null_count} (expected 5), reported={reported}"))
 
-    # Duplicate removal
+    # Exact duplicates are KEPT and reported by default (identical rows are
+    # often genuine repeat transactions), and removed only on request.
     df = pd.DataFrame({"a": [1, 2, 2, 3], "b": ["x", "y", "y", "z"]})
-    c, _ = rule_based_clean(df)
-    results.append(R("Cleaning: duplicate row removal", len(c) == 3,
-                     f"rows={len(c)} (expected 3)"))
+    c, log = rule_based_clean(df)
+    kept = len(c) == 4 and any("exact copies" in l for l in log)
+    c2, _ = rule_based_clean(df, drop_exact_duplicates=True)
+    results.append(R("Cleaning: duplicates reported, removed only on request", kept and len(c2) == 3,
+                     f"default rows={len(c)} (expected 4), opt-in rows={len(c2)} (expected 3)"))
 
     # Header promotion
     df = pd.DataFrame({0: ["product", "Widget A", "Widget B"],

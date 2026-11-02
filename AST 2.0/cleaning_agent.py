@@ -119,6 +119,16 @@ def _parse_defects(raw: str) -> list[dict]:
     return defects[:8]
 
 
+_COMPACT_RETRY_NOTE = (
+    "\n\nIMPORTANT — your previous answer was too long and was cut off before "
+    "the code block closed. Write SHORT code (under 40 lines): normalise text "
+    "with string methods (.str.strip(), .str.upper()) and map only the specific "
+    "variants named in the defects. Never write one mapping entry per distinct "
+    "value. If a defect can't be fixed compactly, leave that column unchanged "
+    "and say so in REASONING."
+)
+
+
 def _parse_fix_response(raw: str) -> tuple[list[str], str]:
     """Splits the fix-step LLM response into (reasoning_lines, code)."""
     code_match = re.search(r"```(?:python)?\s*(.*?)```", raw, re.DOTALL)
@@ -205,8 +215,22 @@ def run_cleaning_agent(
 
         schema_text = ", ".join(df_rule_cleaned.columns.tolist())
         fix_prompt = build_defect_fix_prompt(defects, schema_text)
-        fix_raw = llm_with_fallback(fix_prompt, temperature=0.2, session_id=session_id)
+        # 4096 tokens, not the 2048 default: a fix for several defects can be
+        # long, and when the model ran out of room mid-answer the code block
+        # never closed, so nothing was usable (seen on an 80-country column).
+        fix_raw = llm_with_fallback(fix_prompt, temperature=0.2, session_id=session_id, max_tokens=4096)
         reasoning_lines, code = _parse_fix_response(fix_raw)
+
+        if not code:
+            # One uncached retry with an explicit instruction to stay short —
+            # the usual cause is an exhaustive value-by-value mapping that
+            # doesn't fit. Log the raw answer so a real failure is debuggable.
+            print(f"[cleaning-agent] fix step returned no complete code block; retrying compactly. "
+                  f"Raw response ended with:\n{fix_raw[-600:]}", flush=True)
+            from llm_provider import llm_uncached_code_call
+            retry_raw = llm_uncached_code_call(
+                fix_prompt + _COMPACT_RETRY_NOTE, temperature=0.1, max_tokens=4096)
+            reasoning_lines, code = _parse_fix_response(retry_raw)
 
         if not code:
             return {

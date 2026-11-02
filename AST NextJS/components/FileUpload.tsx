@@ -15,6 +15,8 @@ function uploadFile(
     xhr.open("POST", "/api/upload");
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    // Lets the backend detect a truncated upload instead of storing it.
+    xhr.setRequestHeader("X-File-Size", String(file.size));
     xhr.upload.onprogress = (evt) => {
       if (evt.lengthComputable) onProgress(Math.round((evt.loaded / evt.total) * 100));
     };

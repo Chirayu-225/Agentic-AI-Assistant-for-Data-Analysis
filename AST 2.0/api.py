@@ -281,6 +281,19 @@ async def upload(request: Request, x_service_secret: str = Header(default=""),
         async for chunk in request.stream():
             if chunk:
                 writer.write(chunk)
+        # The browser sends the file's real size. If fewer bytes arrived,
+        # something on the way truncated the upload (this happened through
+        # Next.js middleware's 10 MB body limit) — reject it loudly rather
+        # than store a corrupted file that fails later, or worse, a CSV that
+        # parses with rows silently missing.
+        expected = request.headers.get("x-file-size", "")
+        if expected.isdigit() and int(expected) != writer.size:
+            writer.abort()
+            audit_log.record("upload_incomplete", expected=int(expected), received=writer.size)
+            return JSONResponse(
+                {"success": False,
+                 "error": f"The upload arrived incomplete ({writer.size:,} of {int(expected):,} bytes). Please try again."},
+                status_code=400)
         url = writer.finish()
     except local_store.UploadTooLarge as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=413)

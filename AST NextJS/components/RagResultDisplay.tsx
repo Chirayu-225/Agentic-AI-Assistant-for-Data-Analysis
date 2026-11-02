@@ -1,6 +1,7 @@
 "use client";
 
 import type { RagSource } from "@/lib/pythonClient";
+import MiniMarkdown from "@/components/MiniMarkdown";
 
 interface RagResultDisplayProps {
   kind: "answer" | "insights";
@@ -92,7 +93,7 @@ export default function RagResultDisplay({ kind, text, error, sources }: RagResu
       {kind === "insights" ? (
         <InsightLines text={text} />
       ) : (
-        <p className="text-text text-base leading-relaxed whitespace-pre-wrap">{text}</p>
+        <MiniMarkdown text={text} className="text-text text-base leading-relaxed" />
       )}
       {kind === "answer" && sources && sources.length > 0 && <Sources sources={sources} />}
     </div>

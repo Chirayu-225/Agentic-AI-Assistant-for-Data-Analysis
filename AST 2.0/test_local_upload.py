@@ -82,6 +82,11 @@ def main():
         check("a rejected upload leaves no partial file behind", after == before, str(after - before))
         del os.environ["MAX_UPLOAD_MB"]
 
+        r = c.post("/upload", content=CSV[:20], headers={**H, "x-file-size": str(len(CSV))})
+        check("truncated upload (fewer bytes than the declared size) -> 400",
+              r.status_code == 400 and "incomplete" in r.text, r.text[:120])
+        r = c.post("/upload", content=CSV, headers={**H, "x-file-size": str(len(CSV))})
+        check("matching declared size is accepted", r.status_code == 200, r.text[:120])
         r = c.post("/upload", content=b"", headers=H)
         check("empty upload -> 400", r.status_code == 400, str(r.status_code))
         check("empty upload leaves no partial file", not [f for f in os.listdir(local_store.upload_dir()) if f.endswith(".part")])

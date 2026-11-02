@@ -114,6 +114,116 @@ def _find_likely_join_keys(named_dfs: dict[str, pd.DataFrame]) -> list[str]:
     ]
 
 
+_KEY_LIKE = re.compile(r"(^|_)(id|code|key|sku|no|num|number)$", re.I)
+
+
+def _link_details(a_df: pd.DataFrame, b_df: pd.DataFrame, on: list[str], complete: bool) -> dict:
+    """Cardinality, orphans and key-type agreement for one a<->b link.
+
+    The classic analytics error this guards against is FAN-OUT: joining
+    orders (one row per order) to order_items (many rows per order) and
+    then summing an order-level column such as shipping_fee, which counts
+    each order once per item. Knowing which side is unique is what lets the
+    model (and the user) avoid it. Only computed when both tables are fully
+    loaded — a large file is only sampled, so its uniqueness is unknown."""
+    if not complete:
+        return {"kind": "unknown (large file only sampled)", "aUnique": None, "bUnique": None,
+                "orphansInA": None, "orphansInB": None, "typeMismatch": False}
+    ka = a_df[on].dropna().astype(str)
+    kb = b_df[on].dropna().astype(str)
+    a_unique = not ka.duplicated().any()
+    b_unique = not kb.duplicated().any()
+    kind = {(True, True): "one-to-one", (True, False): "one-to-many",
+            (False, True): "many-to-one", (False, False): "many-to-many"}[(a_unique, b_unique)]
+    a_keys = set(map(tuple, ka.values.tolist()))
+    b_keys = set(map(tuple, kb.values.tolist()))
+    orphans_in_a = int(sum(1 for k in map(tuple, ka.values.tolist()) if k not in b_keys))
+    orphans_in_b = int(sum(1 for k in map(tuple, kb.values.tolist()) if k not in a_keys))
+    mismatch = any(
+        pd.api.types.is_numeric_dtype(a_df[c]) != pd.api.types.is_numeric_dtype(b_df[c]) for c in on)
+    return {"kind": kind, "aUnique": a_unique, "bUnique": b_unique,
+            "orphansInA": orphans_in_a, "orphansInB": orphans_in_b, "typeMismatch": mismatch}
+
+
+def describe_relationships(named_dfs: dict[str, pd.DataFrame], partial: frozenset = frozenset()) -> dict:
+    """Which tables can be joined to which, worked out from column names
+    alone (deterministic — no AI). Two tables are linked when they share
+    an ID-like column name (customer_id, order_id, sku...). Groups are the
+    sets of tables reachable from one another through such links; a table
+    in a group of one can't be joined to anything uploaded.
+
+    Shown to the user with every result and given to the model, so "these
+    four tables can't all be joined" comes with WHICH ones can and what
+    is missing, instead of an empty result. (Found in review: customers,
+    order_items and products uploaded without orders.csv returned 0 rows
+    and a misleading "only common key is product_id".)"""
+    aliases = list(named_dfs)
+    cols = {a: {str(c) for c in named_dfs[a].columns} for a in aliases}
+    links = []
+    for i, a in enumerate(aliases):
+        for b in aliases[i + 1:]:
+            on = sorted(c for c in cols[a] & cols[b] if _KEY_LIKE.search(c))
+            if on:
+                complete = a not in partial and b not in partial
+                links.append({"a": a, "b": b, "on": on,
+                              **_link_details(named_dfs[a], named_dfs[b], on, complete)})
+    parent = {a: a for a in aliases}
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for l in links:
+        parent[find(l["a"])] = find(l["b"])
+    groups: dict[str, list[str]] = {}
+    for a in aliases:
+        groups.setdefault(find(a), []).append(a)
+    group_list = sorted(groups.values(), key=len, reverse=True)
+    unlinked = [g[0] for g in group_list if len(g) == 1]
+    # For an unlinked table, name the ID columns it has, so the user knows
+    # what kind of table would connect it ("needs a table with customer_id").
+    id_cols = {a: sorted(c for c in cols[a] if _KEY_LIKE.search(c)) for a in unlinked}
+    return {
+        "links": links,
+        "groups": group_list,
+        "allConnected": len(group_list) == 1,
+        "unlinked": [{"table": a, "idColumns": id_cols[a]} for a in unlinked],
+    }
+
+
+def _relationships_text(rel: dict) -> str:
+    lines = ["\nHow the tables connect (from shared ID-column names, checked on the data):"]
+    for l in rel["links"]:
+        a, b, on = l["a"], l["b"], ", ".join(l["on"])
+        kind = l.get("kind", "")
+        lines.append(f"  {a} <-> {b} on {on}: {kind}")
+        one, many = (a, b) if kind == "one-to-many" else (b, a) if kind == "many-to-one" else (None, None)
+        if one:
+            lines.append(
+                f"    FAN-OUT: each {one} row matches many {many} rows. Per-line maths using a {one} "
+                f"column is fine (e.g. quantity * unit_price). But a TOTAL of a {one}-level column "
+                f"(a value that belongs to the {one} row itself, like an order's shipping fee or a "
+                f"customer's credit limit) gets counted once per {many} row — aggregate {many} to the "
+                f"{on} level in a subquery first, or take the {one} values from {one} on its own.")
+        elif kind == "many-to-many":
+            lines.append(f"    MANY-TO-MANY: joining multiplies rows on both sides; aggregate one side to "
+                         f"the key first, or say the question can't be answered reliably.")
+        if l.get("orphansInA"):
+            lines.append(f"    {l['orphansInA']} {a} row(s) have no matching {b} row (an INNER JOIN drops them).")
+        if l.get("orphansInB"):
+            lines.append(f"    {l['orphansInB']} {b} row(s) have no matching {a} row (an INNER JOIN drops them).")
+        if l.get("typeMismatch"):
+            lines.append(f"    Key types differ (text vs number): CAST both sides to VARCHAR when joining.")
+    if not rel["links"]:
+        lines.append("  no two tables share an ID-like column")
+    if rel["allConnected"]:
+        lines.append("  All tables are connected.")
+    else:
+        lines.append("  NOT all tables are connected. Groups that can be joined: "
+                     + "; ".join(" + ".join(g) for g in rel["groups"]))
+    return "\n".join(lines)
+
+
 def _build_schema_text(named_dfs: dict[str, pd.DataFrame], large_aliases: frozenset[str] = frozenset()) -> str:
     """`named_dfs` may hold a SAMPLE DataFrame (not the real, full table)
     for any alias in `large_aliases` — see run_multi_table_query's large-
@@ -141,7 +251,7 @@ def _build_schema_text(named_dfs: dict[str, pd.DataFrame], large_aliases: frozen
     join_key_text = (
         "\nLikely join keys (identical column name across tables):\n  " + "\n  ".join(join_keys)
         if join_keys else ""
-    )
+    ) + _relationships_text(describe_relationships(named_dfs, frozenset(large_aliases)))
     from pii_redaction import redact_pii_logged
     from prompt_injection_guard import wrap_untrusted
     text = "\n\n".join(sections) + join_key_text
@@ -175,9 +285,18 @@ Rules:
 - Only reference tables and columns listed above — never invent one.
 - The only operation available is con.sql(...).df() — nothing else.
 - Prefer explicit JOIN ... ON clauses over implicit/comma joins.
-- If the tables available genuinely can't answer this question, write
-  a query that returns an empty result with a comment explaining why,
-  rather than guessing at data that isn't there.
+- If NOT all tables can be joined (see "How the tables connect"), don't
+  return an empty result: join the largest group that CAN be joined and
+  answer as much as that allows. In REASONING, name each table you left
+  out and what it would need to connect (e.g. "customers was left out:
+  nothing uploaded links customer_id to order_id — an orders table with
+  both columns would").
+- Never invent a join on columns that only look similar by accident.
+- Respect every FAN-OUT note above: never SUM/AVG a column from the "one"
+  side of a one-to-many join without first aggregating the "many" side
+  (or deduplicating). Double counting is the most common join error.
+- If even that can't answer the question, write a query that returns an
+  empty result, and say why in REASONING rather than guessing.
 """
 
 
@@ -194,6 +313,31 @@ def _parse_sql_response(raw: str) -> tuple[str, str]:
 
 
 def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> dict:
+    """Skips byte-identical duplicate uploads, runs the query, and attaches
+    the relationship map (which tables link, which don't) plus any notes
+    to EVERY response — success or failure — so the UI can always show
+    why a join did or didn't happen."""
+    import hashlib
+    notes: list[str] = []
+    seen: dict[str, str] = {}
+    unique = []
+    for ds in datasets:
+        digest = hashlib.sha256(ds["csv_bytes"]).hexdigest()
+        if digest in seen:
+            notes.append(f"'{ds['filename']}' (as '{ds['alias']}') is identical to "
+                         f"'{seen[digest]}' and was skipped.")
+            continue
+        seen[digest] = ds["alias"]
+        unique.append(ds)
+    info: dict = {}
+    out = _run_multi_table_query(unique, query, session_id, info)
+    out["notes"] = notes + info.get("notes", [])
+    if "relationships" in info:
+        out["relationships"] = info["relationships"]
+    return out
+
+
+def _run_multi_table_query(datasets: list[dict], query: str, session_id: str, info: dict) -> dict:
     """
     datasets: [{"alias": str, "csv_bytes": bytes, "filename": str}, ...]
 
@@ -227,7 +371,7 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
     referenced "Known Limitations"), not something to paper over here.
     """
     if len(datasets) < 2:
-        return {"success": False, "error": "At least 2 datasets are needed for a multi-table query."}
+        return {"success": False, "error": "At least 2 different datasets are needed for a multi-table query."}
 
     dataframe_tables: dict[str, pd.DataFrame] = {}
     file_tables: dict[str, str] = {}          # alias -> temp file path, large CSV/TXT only
@@ -288,6 +432,7 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
             from sandbox_limits import run_multi_table_mixed_sql_sandboxed, DEFAULT_MEMORY_MB, LARGE_FILE_MEMORY_MB
 
             all_aliases = list(schema_dfs.keys())  # preserves original dataset order across both branches
+            info["relationships"] = describe_relationships(schema_dfs, frozenset(large_aliases))
             schema_text = _build_schema_text(schema_dfs, large_aliases=frozenset(large_aliases))
             prompt = build_multi_table_prompt(schema_text, query)
             raw = llm_with_fallback(prompt, temperature=0.1, session_id=session_id)
@@ -311,6 +456,32 @@ def run_multi_table_query(datasets: list[dict], query: str, session_id: str) -> 
             # function is also able to handle large ones.
             memory_mb = LARGE_FILE_MEMORY_MB if file_tables else DEFAULT_MEMORY_MB
             sbr = run_multi_table_mixed_sql_sandboxed(code, dataframe_tables, file_tables, memory_mb=memory_mb)
+
+            # One repair attempt, like single-table questions get: show the
+            # model its SQL and the exact DuckDB error (e.g. "Binder Error:
+            # Referenced table "o" not found" when an alias is used outside
+            # the subquery that defines it — the one failure in the join
+            # eval). Timeouts aren't retried: a rewrite rarely fixes those.
+            retried = False
+            if not sbr.success and "exceeded" not in (sbr.error or "").lower():
+                repair_prompt = (
+                    prompt
+                    + "\n\nYOUR PREVIOUS QUERY FAILED.\nPrevious code:\n```python\n" + code + "\n```\n"
+                    + "Error: " + str(sbr.error) + "\n\n"
+                    + "Rewrite it so it answers the same question and runs. Common causes: a table "
+                    + "alias used outside the subquery that defines it, a column that doesn't exist, "
+                    + "or a type mismatch in a join (CAST both sides to VARCHAR). Keep the same "
+                    + "REASONING + ```python``` format."
+                )
+                repair_raw = llm_with_fallback(repair_prompt, temperature=0.0, session_id=session_id)
+                repair_reasoning, repair_code = _parse_sql_response(repair_raw)
+                if repair_code and repair_code.strip() != code.strip():
+                    first_error = sbr.error
+                    retried = True
+                    reasoning, code = repair_reasoning or reasoning, repair_code
+                    sbr = run_multi_table_mixed_sql_sandboxed(code, dataframe_tables, file_tables, memory_mb=memory_mb)
+                    if not sbr.success:
+                        sbr.error = f"{sbr.error} (first attempt: {first_error})"
 
             if not sbr.success:
                 return {

@@ -14,7 +14,8 @@ fix against that instead.
 Usage:
     python eval_heldout.py                      # real LLM pipeline (GROQ_API_KEY)
     python eval_heldout.py --solver shortcut    # offline, no-LLM baseline
-    python eval_heldout.py --repeat 3           # also measures consistency
+    python eval_heldout.py --repeat 3           # also measures consistency (recommended
+                                                # before quoting a number: one run can be lucky)
 """
 
 from __future__ import annotations
@@ -73,8 +74,28 @@ def main(argv=None) -> int:
         by_cat[r.category or "uncategorised"][0] += int(r.correct)
         by_cat[r.category or "uncategorised"][1] += 1
 
+    # Consistency: share of questions whose answer VALUES were identical on
+    # every run (only meaningful with --repeat 2+). The model is not fully
+    # deterministic, so one run can't tell a reliable answer from a lucky one.
+    consistency = None
+    if args.repeat > 1:
+        by_q: dict[str, set] = {}
+        for r in pooled:
+            # A failed run (pipeline/execution error, e.g. the provider's
+            # rate limit) is not an answer, so repeated failures must never
+            # count as "consistent" with each other.
+            failed = r.outcome in ("pipeline_error", "execution_error", "no_answer", "timeout",
+                                   "security_block", "solver_exception")
+            by_q.setdefault(r.id, set()).add("ERROR" if failed else r.signature)
+        consistency = (round(sum(len(v) == 1 and "ERROR" not in v for v in by_q.values()) / len(by_q), 3)
+                       if by_q else None)
+        always_right = {r.id for r in pooled} - {r.id for r in pooled if not r.correct}
+        consistent_and_right = round(len(always_right) / len(by_q), 3) if by_q else None
+
     combined = {
         "solver": args.solver, "repeat": args.repeat, "runs": n, "correct": k,
+        "consistency": consistency,
+        "rightOnEveryRun": consistent_and_right if args.repeat > 1 else None,
         "accuracy": round(k / n, 3) if n else 0.0, "accuracy95": [round(lo, 3), round(hi, 3)],
         "perDataset": {name: {"accuracy": s["accuracy"], "accuracy95": s["accuracy95"],
                               "outcomes": s["outcomes"]} for name, s in per_set.items()},
@@ -90,6 +111,9 @@ def main(argv=None) -> int:
           f"(95% interval {lo * 100:.1f}–{hi * 100:.1f}%, {k}/{n} runs)")
     for c, v in combined["byCategory"].items():
         print(f"  {c:<14} {v['correct']}/{v['n']}")
+    if consistency is not None:
+        print(f"Consistency: {consistency * 100:.0f}% of questions gave the same answer on all {args.repeat} runs; "
+              f"{combined['rightOnEveryRun'] * 100:.0f}% were right on every run")
     print(f"Pooled summary: {path}")
     return 0
 

@@ -1,0 +1,15 @@
+id,question,expected,answer_type,tolerance,trap
+JN01,What is the total revenue (quantity x unit_price) from Completed orders?,1345100.0,number,0.001,
+JN02,Which product category brings in the most revenue from Completed orders?,Electronics,text,,
+JN03,How many distinct Retail customers placed at least one order?,28,number,0,
+JN04,What is the total shipping fee across orders that contain at least one Electronics item?,6966.0,number,0.001,fan-out
+JN05,What is the total shipping fee across all Completed orders?,9036.0,number,0.001,fan-out if joined to lines
+JN06,"On average, how many units (sum of quantity) are in a Completed order?",7.6,number,0.01,
+JN07,How many customers have never placed an order?,8,number,0,anti-join
+JN08,How many products in the catalogue have never been ordered?,4,number,0,anti-join
+JN09,Which customer segment generated the most revenue from Completed orders?,Retail,text,,
+JN10,What is the total quantity of Furniture items sold in Completed orders?,569,number,0,
+JN11,What was the revenue from Corporate customers' Completed orders placed in March 2026?,140950.0,number,0.001,
+JN12,How many orders have more than 3 order lines?,89,number,0,
+JN13,How many order lines reference a product that is not in the products table?,20,number,0,orphans
+JN14,What is the total of revenue plus shipping fees across all Completed orders?,1354136.0,number,0.001,fan-out

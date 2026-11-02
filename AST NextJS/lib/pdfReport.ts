@@ -54,6 +54,7 @@
  */
 
 import jsPDF from "jspdf";
+import { miniMarkdownToPlain } from "@/lib/miniMarkdown";
 
 export interface ReportInsight {
   finding: string;
@@ -181,7 +182,7 @@ function drawInsightCard(doc: jsPDF, index: number, insight: ReportInsight, y: n
 function drawQaCard(doc: jsPDF, qa: ReportQaPair, y: number): number {
   const innerWidth = CONTENT_WIDTH - CARD_PAD * 2;
   const qLines = measureWrapped(doc, `Q: ${qa.question}`, innerWidth);
-  const aLines = measureWrapped(doc, qa.answer, innerWidth);
+  const aLines = measureWrapped(doc, miniMarkdownToPlain(qa.answer), innerWidth);
   const qHeight = qLines.length * 4.6;
   const aHeight = aLines.length * 4.4;
   const cardHeight = CARD_PAD * 2 + qHeight + 2 + aHeight;

@@ -15,13 +15,20 @@
  * Response: { url: "local://<id>", bytes: <n> }
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { uploadToPython, UploadRejectedError, upstreamErrorResponse } from "@/lib/pythonClient";
+import { ACCESS_COOKIE, checkAccess } from "@/lib/accessGate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  // This route is excluded from middleware.ts so large uploads aren't
+  // truncated at Next.js's 10 MB middleware body limit — which means the
+  // access-code check has to happen here instead.
+  const denied = await checkAccess(request.cookies.get(ACCESS_COOKIE)?.value);
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status });
+
   if (!request.body) {
     return NextResponse.json({ error: "No file received" }, { status: 400 });
   }
@@ -34,7 +41,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = await uploadToPython(request.body, filename);
+    const declaredSize = request.headers.get("x-file-size") ?? undefined;
+    const result = await uploadToPython(request.body, filename, declaredSize);
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof UploadRejectedError) {

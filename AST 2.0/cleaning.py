@@ -50,13 +50,96 @@ def _parse_money(series: pd.Series) -> tuple[pd.Series, bool]:
     return values, had_currency
 
 
-def _parse_dates(series: pd.Series) -> pd.Series:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        try:
-            return pd.to_datetime(series, errors="coerce", format="mixed")
-        except (TypeError, ValueError):  # pandas < 2.0 has no format="mixed"
-            return pd.to_datetime(series, errors="coerce")
+_NUMERIC_DATE = re.compile(r"^\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?:[ T].*)?\s*$")
+
+
+def _parse_dates(series: pd.Series) -> tuple[pd.Series, str]:
+    """Parses a date column with ONE convention for the whole column.
+
+    Numeric dates like 05/03/2026 are ambiguous: 5 March (day-first, the
+    Indian/UK convention) or 3 May (month-first, US). Earlier versions let
+    pandas guess value by value, so one column mixed conventions —
+    "05/03/2026" became 3 May while "25/03/2026" became 25 March — and
+    every monthly figure on day-first data was wrong (found in review).
+
+    Now the column's convention is decided once, from all its values: any
+    first part > 12 means day-first; any second part > 12 means
+    month-first; both at once means the column itself is inconsistent and
+    it is NOT parsed. If nothing decides it, day-first is assumed (the
+    target users' convention) and the returned note says so. ISO
+    (2026-03-05) and named-month dates are unambiguous and parsed as-is.
+
+    Returns (parsed dates, note for the cleaning log — '' if nothing to say)."""
+    text = series.astype(str).str.strip()
+    parts = text.str.extract(_NUMERIC_DATE)
+    numeric = parts[0].notna()
+    note = ""
+    dayfirst = True
+    if numeric.any():
+        first = pd.to_numeric(parts.loc[numeric, 0])
+        second = pd.to_numeric(parts.loc[numeric, 1])
+        day_first_evidence = bool((first > 12).any())
+        month_first_evidence = bool((second > 12).any())
+        if day_first_evidence and month_first_evidence:
+            return pd.Series(pd.NaT, index=series.index), (
+                "mixes day-first and month-first dates (e.g. both 25/03 and 03/25) — "
+                "left as text; fix the source so one convention is used")
+        if month_first_evidence:
+            dayfirst = False
+            note = "read as month-first (MM/DD/YYYY): some values have a month part above 12"
+        elif day_first_evidence:
+            note = "read as day-first (DD/MM/YYYY): some values have a day above 12"
+        else:
+            note = ("every date is ambiguous (day and month both ≤ 12) — ASSUMED day-first "
+                    "(DD/MM/YYYY); if the file uses MM/DD/YYYY, these dates are wrong")
+
+    out = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if numeric.any():
+        num = parts.loc[numeric]
+        a = pd.to_numeric(num[0]); b = pd.to_numeric(num[1]); y = pd.to_numeric(num[2])
+        y = y.where(y >= 100, y + 2000)
+        day, month = (a, b) if dayfirst else (b, a)
+        out.loc[numeric] = pd.to_datetime(
+            pd.DataFrame({"year": y, "month": month, "day": day}), errors="coerce")
+    rest = ~numeric
+    if rest.any():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            try:
+                out.loc[rest] = pd.to_datetime(text[rest], errors="coerce", format="mixed")
+            except (TypeError, ValueError):  # pandas < 2.0 has no format="mixed"
+                out.loc[rest] = pd.to_datetime(text[rest], errors="coerce")
+    return out, note
+
+
+def _currency_labels(series: pd.Series) -> list[str]:
+    """Distinct currencies written in a column, e.g. ['$ (USD)', '₹ (INR)']."""
+    text = series.dropna().astype(str)
+    found = []
+    for pattern, label in _CURRENCY_NAMES:
+        if text.str.contains(pattern, na=False).any():
+            found.append(label)
+    return found
+
+
+def _keep_unparsed(df_c: pd.DataFrame, col: str, original: pd.Series, parsed: pd.Series,
+                   present: pd.Series, what: str, log: list) -> None:
+    """A non-blank cell that couldn't be converted ('pending', 'TBD') is not
+    the same as an empty cell. Keep its original text in a side column and
+    name it in the log, instead of silently turning it into a blank."""
+    lost = present & parsed.isna()
+    n = int(lost.sum())
+    if not n:
+        return
+    side = f"{col}_original"
+    k = 2
+    while side in df_c.columns:
+        side = f"{col}_original_{k}"
+        k += 1
+    df_c[side] = original.where(lost)
+    examples = ", ".join(repr(v) for v in original[lost].astype(str).unique()[:4])
+    log.append(f"⚠ {n} value(s) in '{col}' aren't {what} ({examples}) — blank in '{col}', "
+               f"original text kept in '{side}'")
 
 
 def _category_key(value: str) -> str:
@@ -79,8 +162,16 @@ def _merge_category_variants(col: pd.Series):
     # ignored. Judged on those normalised keys (not raw spellings), so a
     # small table full of variants still qualifies, while free text and
     # IDs (nearly every value distinct) never do.
-    n_keys = present.map(_category_key).nunique()
+    keys = present.map(_category_key)
+    n_keys = keys.nunique()
     if n_keys > 60 or n_keys > max(10, 0.5 * len(present)):
+        return None
+    # Values that are really numbers or amounts ("$1,000", "₹1,000",
+    # "1.000") reduce to the same digits — merging them would silently
+    # rewrite one currency or number as another. Never treat those as
+    # spelling variants (found in review: a mixed ₹/$ column had '$1,000'
+    # rewritten as '₹1,000').
+    if (keys.str.fullmatch(r"\d+", na=False)).mean() >= 0.5:
         return None
 
     counts = present.value_counts()
@@ -167,10 +258,18 @@ def detect_currencies(raw_df: pd.DataFrame) -> dict:
     return found
 
 
-def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """
     Apply deterministic cleaning steps in sequence.
     Returns (cleaned_df, log_of_actions).
+
+    drop_exact_duplicates: identical rows are KEPT by default and only
+    reported. In transaction data, two identical rows are often two real
+    sales (same product, quantity and price on the same day); deleting
+    them silently removed ~30% of a hotel-bookings file and cut revenue in
+    review tests. Pass True only when the user has confirmed the copies are
+    accidental. Rows that repeat a unique record ID (same invoice_id twice)
+    are still merged either way — those are the same record by definition.
     """
     df_c = raw_df.copy()
     log  = []
@@ -237,11 +336,15 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     if df_c.shape[0] < before_rows:
         log.append(f"✓ Dropped {before_rows - df_c.shape[0]} fully-empty row(s)")
 
-    # ── 4. Drop exact duplicate rows ──────────────────────────────────────────
-    before_rows = df_c.shape[0]
-    df_c.drop_duplicates(inplace=True)
-    if df_c.shape[0] < before_rows:
-        log.append(f"✓ Removed {before_rows - df_c.shape[0]} duplicate row(s)")
+    # ── 4. Exact duplicate rows: reported, removed only on request ────────────
+    n_dupes = int(df_c.duplicated().sum())
+    if n_dupes and drop_exact_duplicates:
+        df_c.drop_duplicates(inplace=True)
+        log.append(f"✓ Removed {n_dupes} exact duplicate row(s), as requested")
+    elif n_dupes:
+        log.append(f"⚠ {n_dupes} row(s) are exact copies of another row — KEPT, because "
+                   f"identical rows are often genuine repeat transactions. Remove them only "
+                   f"if they are accidental copies.")
 
     # ── 5. Per-column type cleaning ───────────────────────────────────────────
     def _is_string_col(series):
@@ -284,8 +387,17 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         #     is still recognised as money.
         parsed, had_currency = _parse_money(series)
         if parsed[present].notna().sum() >= n_present * 0.8:
+            currencies = _currency_labels(series[present]) if had_currency else []
+            if len(currencies) > 1:
+                # ₹1,000 + $1,000 is not 2,000 of anything. Leave the column
+                # as text so nothing can sum it, and say why.
+                log.append(f"⚠ '{col}' mixes currencies ({', '.join(currencies)}) — left as text so "
+                           f"different currencies are never added together; split or convert it first")
+                continue
+            original = df_c[col].copy()
             df_c[col] = parsed.where(present)
             log.append(f"✓ Parsed {'currency' if had_currency else 'numeric'} values in '{col}'")
+            _keep_unparsed(df_c, col, original, parsed, present, "numbers", log)
             continue
 
         # 5c. Dates — mixed formats in one column ("2026-03-05",
@@ -294,10 +406,15 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         #     and codes are never coerced.
         looks_like_date = series[present].str.contains(_DATE_LIKE, regex=True, na=False)
         if looks_like_date.sum() >= n_present * 0.6:
-            parsed_date = _parse_dates(series)
+            parsed_date, date_note = _parse_dates(series)
             if parsed_date[present].notna().sum() >= n_present * 0.8:
+                original = df_c[col].copy()
                 df_c[col] = parsed_date.where(present)
-                log.append(f"✓ Parsed dates in '{col}'")
+                log.append(f"✓ Parsed dates in '{col}'" + (f": {date_note}" if date_note else ""))
+                _keep_unparsed(df_c, col, original, parsed_date, present, "valid dates", log)
+                continue
+            if date_note.startswith("mixes"):
+                log.append(f"⚠ '{col}' {date_note}")
                 continue
 
     # ── 6. Strip whitespace from remaining strings (preserve real NaN) ─────────
@@ -345,10 +462,17 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
             log.append(f"✓ Merged spelling variants in '{col}': {examples}")
 
     # ── 10. Duplicates, again, now that values are normalised ─────────────────
-    before_rows = df_c.shape[0]
-    df_c = df_c.drop_duplicates()
-    if df_c.shape[0] < before_rows:
-        log.append(f"✓ Removed {before_rows - df_c.shape[0]} duplicate row(s) that only differed in formatting")
+    # Same rule as step 4: reported, removed only when requested.
+    if drop_exact_duplicates:
+        before_rows = df_c.shape[0]
+        df_c = df_c.drop_duplicates()
+        if df_c.shape[0] < before_rows:
+            log.append(f"✓ Removed {before_rows - df_c.shape[0]} duplicate row(s) that only differed in formatting")
+    else:
+        n_after = int(df_c.duplicated().sum())
+        if n_after > n_dupes:
+            log.append(f"⚠ {n_after - n_dupes} more row(s) became identical after formatting was "
+                       f"standardised — KEPT; check whether they are accidental copies")
 
     # Rows that repeat a unique record ID and agree on every value both of
     # them have (one copy may have a blank cell) are the same record
@@ -381,7 +505,11 @@ def rule_based_clean(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     # now stay blank: pandas sums, means and counts skip them, and the log
     # says exactly where they are. (The opt-in Data Quality Agent can still
     # propose an imputation the user explicitly accepts.)
+    side_cols = {c for c in df_c.columns if re.fullmatch(r".+_original(_\d+)?", str(c))
+                 and str(c).rsplit("_original", 1)[0] in df_c.columns}
     for col in df_c.columns:
+        if col in side_cols:
+            continue  # blank by design: only filled where a value couldn't be converted
         null_count = int(df_c[col].isnull().sum())
         if null_count:
             log.append(f"⚠ '{col}' has {null_count} missing value(s) — left blank (calculations skip them; nothing was filled in)")

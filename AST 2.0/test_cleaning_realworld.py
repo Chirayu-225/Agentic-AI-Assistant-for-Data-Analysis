@@ -95,6 +95,44 @@ df = pd.DataFrame({"claim_id": ["C1", "C1"], "amount": ["100", "999"]})
 c, _ = rule_based_clean(df)
 check("same ID with conflicting values is NOT silently dropped", len(c) == 2)
 
+print("\nPART 8 — one date convention per column (found in review)")
+d = pd.DataFrame({"inv": list("ABCD"), "billed": ["04/02/2025", "11/02/2025", "28/02/2025", "03/03/2025"]})
+c, log = rule_based_clean(d)
+check("DD/MM column is read day-first for EVERY value",
+      [str(x)[:10] for x in c["billed"]] == ["2025-02-04", "2025-02-11", "2025-02-28", "2025-03-03"], str(c["billed"].tolist()))
+d = pd.DataFrame({"inv": list("ABC"), "billed": ["02/04/2025", "02/28/2025", "03/03/2025"]})
+c, _ = rule_based_clean(d)
+check("MM/DD column is read month-first for EVERY value",
+      [str(x)[:10] for x in c["billed"]] == ["2025-02-04", "2025-02-28", "2025-03-03"], str(c["billed"].tolist()))
+d = pd.DataFrame({"inv": list("AB"), "billed": ["04/02/2025", "11/02/2025"]})
+c, log = rule_based_clean(d)
+check("fully ambiguous column is assumed day-first AND flagged", str(c["billed"].iloc[0])[:10] == "2025-02-04"
+      and any("ASSUMED day-first" in l for l in log), str(log))
+d = pd.DataFrame({"inv": list("ABC"), "billed": ["28/02/2025", "02/28/2025", "01/01/2025"]})
+c, log = rule_based_clean(d)
+check("a column mixing both conventions is left as text and flagged",
+      not pd.api.types.is_datetime64_any_dtype(c["billed"]) and any("mixes day-first" in l for l in log))
+
+print("\nPART 9 — duplicates are kept and reported unless removal is requested")
+t = pd.DataFrame({"sku": ["S1", "S1", "S2"], "qty": [2, 2, 1], "price": [50, 50, 80]})
+c, log = rule_based_clean(t)
+check("identical sales rows are kept (revenue unchanged)", (c.qty * c.price).sum() == 280, str(c.to_dict("list")))
+check("and reported", any("exact copies" in l for l in log), str(log))
+c, _ = rule_based_clean(t, drop_exact_duplicates=True)
+check("removed when explicitly requested", len(c) == 2)
+
+print("\nPART 10 — mixed currencies and non-numeric values are flagged, not hidden")
+m = pd.DataFrame({"id": list("ABCD"), "fee": ["₹500", "€500", "₹250", "€100"]})
+c, log = rule_based_clean(m)
+check("mixed ₹/€ column is not converted to one number column", not pd.api.types.is_numeric_dtype(c["fee"]))
+check("and its values are untouched (no '€500' rewritten as '₹500')", c["fee"].tolist() == ["₹500", "€500", "₹250", "€100"], str(c["fee"].tolist()))
+check("and a warning names the currencies", any("mixes currencies" in l for l in log), str(log))
+p = pd.DataFrame({"id": list("ABCDEFGHIJ"), "paid": ["10", "20", "30", "40", "50", "60", "70", "80", "on hold", "N/A"]})
+c, log = rule_based_clean(p)
+check("'on hold' keeps its text in a side column", "paid_original" in c.columns and c["paid_original"].iloc[8] == "on hold", str(c.columns.tolist()))
+check("a real blank marker ('N/A') is NOT copied to the side column", pd.isna(c["paid_original"].iloc[9]))
+check("the log names the non-numeric value", any("on hold" in l for l in log), str(log))
+
 print()
 if FAIL:
     print(f"DONE — {len(FAIL)} FAILURE(S): {FAIL}")

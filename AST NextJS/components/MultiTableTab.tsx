@@ -5,7 +5,7 @@ import FileUpload, { UploadedFile } from "@/components/FileUpload";
 import { TableResult } from "@/components/ResultDisplay";
 import ShowWork from "@/components/ShowWork";
 import { getOrCreateSessionId } from "@/lib/sessionId";
-import type { MultiTableQueryResponse } from "@/lib/pythonClient";
+import type { MultiTableQueryResponse, TableRelationships } from "@/lib/pythonClient";
 
 interface RegisteredDataset extends UploadedFile {
   alias: string;
@@ -19,17 +19,80 @@ function defaultAliasFromFilename(filename: string): string {
     .toLowerCase() || "table";
 }
 
+/** Which uploaded tables link to which (from the backend's deterministic
+ * check on shared ID columns), shown with every result so "these can't
+ * all be joined" always comes with what CAN be joined and what's missing. */
+function RelationshipMap({ rel, notes }: { rel?: TableRelationships; notes?: string[] }) {
+  if (!rel && !(notes && notes.length)) return null;
+  return (
+    <div className="border border-border rounded-md bg-base p-3 mb-3 font-mono text-xs flex flex-col gap-1.5">
+      <p className="text-[10px] text-muted tracking-widest">HOW THE TABLES CONNECT</p>
+      {rel?.links.map((l, i) => (
+        <div key={i}>
+          <p className="text-text">
+            <span className="text-accent">✓</span> {l.a} ↔ {l.b}{" "}
+            <span className="text-muted">on {l.on.join(", ")}{l.kind ? ` · ${l.kind}` : ""}</span>
+          </p>
+          {(l.kind === "one-to-many" || l.kind === "many-to-one") && (
+            <p className="text-muted pl-4">
+              one {l.kind === "one-to-many" ? l.a : l.b} row ↔ many {l.kind === "one-to-many" ? l.b : l.a} rows —
+              totals of {l.kind === "one-to-many" ? l.a : l.b}-level values must be aggregated first
+            </p>
+          )}
+          {l.kind === "many-to-many" && (
+            <p className="text-yellow-500 pl-4">⚠ many-to-many: joining multiplies rows on both sides</p>
+          )}
+          {!!l.orphansInA && <p className="text-yellow-500 pl-4">⚠ {l.orphansInA} {l.a} row(s) have no match in {l.b}</p>}
+          {!!l.orphansInB && <p className="text-yellow-500 pl-4">⚠ {l.orphansInB} {l.b} row(s) have no match in {l.a}</p>}
+          {l.typeMismatch && <p className="text-yellow-500 pl-4">⚠ key is text in one table and a number in the other</p>}
+        </div>
+      ))}
+      {rel && rel.links.length === 0 && <p className="text-muted">No two tables share an ID column.</p>}
+      {rel?.unlinked.map((u, i) => (
+        <p key={`u${i}`} className="text-yellow-500">
+          ⚠ {u.table} doesn&apos;t connect to the others
+          {u.idColumns.length > 0
+            ? ` — add a table that also has ${u.idColumns.join(" or ")} and an ID from the other tables`
+            : " — it has no ID column to join on"}
+        </p>
+      ))}
+      {notes?.map((n, i) => (
+        <p key={`n${i}`} className="text-muted">ℹ {n}</p>
+      ))}
+    </div>
+  );
+}
+
 export default function MultiTableTab() {
   const [datasets, setDatasets] = useState<RegisteredDataset[]>([]);
   const [showUploadSlot, setShowUploadSlot] = useState(true);
   const [query, setQuery] = useState("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<MultiTableQueryResponse | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   function handleDatasetUploaded(file: UploadedFile) {
-    setDatasets((prev) => [...prev, { ...file, alias: defaultAliasFromFilename(file.filename) }]);
+    // Uploads are content-addressed: the same file always gets the same
+    // url, so a repeat is caught here instead of joining a table to itself.
+    const existing = datasets.find((d) => d.url === file.url);
+    if (existing) {
+      setNotice(`${file.filename} is already added (as "${existing.alias}"), so it was skipped.`);
+      setShowUploadSlot(false);
+      return;
+    }
+    setNotice(null);
+    setDatasets((prev) => {
+      const base = defaultAliasFromFilename(file.filename);
+      let alias = base;
+      for (let n = 2; prev.some((d) => d.alias === alias); n++) alias = `${base}_${n}`;
+      return [...prev, { ...file, alias }];
+    });
     setShowUploadSlot(false);
   }
+
+  const duplicateAliases = datasets
+    .map((d) => d.alias.trim().toLowerCase())
+    .filter((a, i, all) => a && all.indexOf(a) !== i);
 
   function updateAlias(index: number, alias: string) {
     setDatasets((prev) => prev.map((d, i) => (i === index ? { ...d, alias } : d)));
@@ -103,6 +166,13 @@ export default function MultiTableTab() {
           </div>
         )}
 
+        {notice && <p className="font-mono text-xs text-yellow-500">⚠ {notice}</p>}
+        {duplicateAliases.length > 0 && (
+          <p className="font-mono text-xs text-yellow-500">
+            ⚠ Two tables are named &quot;{duplicateAliases[0]}&quot; — give each a different name.
+          </p>
+        )}
+
         {showUploadSlot ? (
           <FileUpload
             compact
@@ -138,7 +208,7 @@ export default function MultiTableTab() {
             />
             <button
               onClick={handleRunQuery}
-              disabled={running || !query.trim()}
+              disabled={running || !query.trim() || duplicateAliases.length > 0}
               className="px-4 py-2 rounded-md bg-accent text-base font-mono text-xs font-semibold disabled:opacity-40 shrink-0"
             >
               {running ? "Running..." : "Run Query"}
@@ -156,7 +226,8 @@ export default function MultiTableTab() {
       {result && !result.success && (
         <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
           <p className="font-mono text-xs text-red-400 mb-1">// QUERY ERROR</p>
-          <p className="text-red-300 text-sm">{result.error ?? "Query failed."}</p>
+          <p className="text-red-300 text-sm mb-3">{result.error ?? "Query failed."}</p>
+          <RelationshipMap rel={result.relationships} notes={result.notes} />
           <ShowWork code={result.code} language="sql" label="Query that failed" />
         </div>
       )}
@@ -166,6 +237,7 @@ export default function MultiTableTab() {
           {result.reasoning && (
             <p className="font-mono text-xs text-[#818CF8] mb-3">{result.reasoning}</p>
           )}
+          <RelationshipMap rel={result.relationships} notes={result.notes} />
           <p className="font-mono text-[11px] text-muted tracking-widest mb-3">
             {result.rowCount} ROW(S)
           </p>

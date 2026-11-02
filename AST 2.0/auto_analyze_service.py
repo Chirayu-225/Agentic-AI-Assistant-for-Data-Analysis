@@ -374,6 +374,8 @@ def answer_followup(
     """
     try:
         df = _read_csv(csv_bytes, filename)
+        from cleaning import detect_currencies
+        currencies = detect_currencies(df)  # from the RAW frame — cleaning strips symbols
         df, _ = cached_rule_clean(df, csv_bytes, rule_based_clean)
     except Exception as e:
         return {"success": False, "error": f"Could not load dataset: {e}"}
@@ -396,12 +398,12 @@ def answer_followup(
         decision_prompt = build_followup_decision_prompt(schema_text, insights_text, prior_qa_text, question)
         decision_raw = llm_with_fallback(decision_prompt, temperature=0.1, session_id=session_id)
 
-        computed_facts: list[str] = []
+        computed_facts: list[tuple[str, str]] = []  # (what was measured, value)
         if "NO_CODE_NEEDED" not in decision_raw.upper():
-            for code in _extract_all_code_blocks(decision_raw)[:3]:
+            for label, code in _extract_labelled_code_blocks(decision_raw)[:3]:
                 sbr = run_sandboxed(code, df, include_charts=False, timeout_seconds=15)
                 if sbr.success and sbr.produced:
-                    computed_facts.append(_format_computed_value(sbr.value))
+                    computed_facts.append((label, _format_computed_value(sbr.value)))
                 else:
                     # One angle failing doesn't sink the others — proceed
                     # with whichever angles DID compute successfully.
@@ -427,15 +429,29 @@ def answer_followup(
         from pii_redaction import redact_pii_logged
         from prompt_injection_guard import wrap_untrusted
         computed_facts = [
-            wrap_untrusted(redact_pii_logged(f, context="follow-up computed fact"), source_label="computed result")
-            for f in computed_facts
+            (redact_pii_logged(label, context="follow-up angle label")[:160],
+             wrap_untrusted(redact_pii_logged(f, context="follow-up computed fact"), source_label="computed result"))
+            for label, f in computed_facts
         ]
-        answer_prompt = build_followup_answer_prompt(insights_text, prior_qa_text, computed_facts, question)
+        answer_prompt = build_followup_answer_prompt(insights_text, prior_qa_text, computed_facts, question, currencies)
         answer = insight_llm(answer_prompt, temperature=0.2)
 
         return {"success": True, "answer": answer.strip(), "error": None}
     except Exception as e:
         return {"success": False, "error": f"Follow-up failed: {e}"}
+
+def _extract_labelled_code_blocks(raw: str) -> list[tuple[str, str]]:
+    """[(label, code)] for every ```python block, the label taken from an
+    `ANGLE: ...` line just above it (see build_followup_decision_prompt).
+    A block with no label gets a generic one rather than being dropped."""
+    out = []
+    for i, m in enumerate(re.finditer(r"(?:ANGLE\s*:\s*([^\n]+)\n\s*)?```(?:python)?\s*(.*?)```", raw, re.DOTALL | re.I), start=1):
+        label = (m.group(1) or "").strip().strip("*").strip() or f"additional computation {i}"
+        code = m.group(2).strip()
+        if code:
+            out.append((label, code))
+    return out
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Verified insights

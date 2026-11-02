@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Analyst Assistant: rising bars (computed numbers) with a bold check
+       (verified). Teal on the app's dark base colour; tuned to stay
+       legible at 16x16 in a browser tab. -->
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#0A0D14" stroke="#1F2937" stroke-width="2"/>
+  <rect x="11" y="40" width="11" height="14" rx="2.5" fill="#2DD4BF" opacity="0.6"/>
+  <rect x="26.5" y="32" width="11" height="22" rx="2.5" fill="#2DD4BF" opacity="0.8"/>
+  <rect x="42" y="24" width="11" height="30" rx="2.5" fill="#2DD4BF"/>
+  <path d="M10 20 L18.5 28 L34 11" fill="none" stroke="#0A0D14" stroke-width="12"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 20 L18.5 28 L34 11" fill="none" stroke="#F8FAFC" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
