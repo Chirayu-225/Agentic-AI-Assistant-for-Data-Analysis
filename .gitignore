@@ -59,3 +59,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Generated cleaning-benchmark data (regenerate with: python clean_bench.py build). MANIFEST.json IS committed.
+AST 2.0/eval_data/clean_bench/generated/

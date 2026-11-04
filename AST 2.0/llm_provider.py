@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -145,6 +147,20 @@ class DailyLimitReached(RuntimeError):
     """Raised when today's LLM call budget is spent."""
 
 
+class ProviderRateLimited(RuntimeError):
+    """The model provider refused a call with its own rate limit (HTTP 429).
+
+    `daily` is True for a per-day quota (retrying today is pointless); otherwise
+    it is a short per-minute limit. The message is safe to show to users: it
+    never includes the provider's response body, which carries the account's
+    organisation id."""
+
+    def __init__(self, message: str, daily: bool = False, retry_after: float | None = None):
+        super().__init__(message)
+        self.daily = daily
+        self.retry_after = retry_after
+
+
 _usage_lock = threading.Lock()
 _usage_path = os.environ.get(
     "LLM_USAGE_PATH",
@@ -203,6 +219,15 @@ def _reserve_call() -> None:
         _save_usage()
 
 
+def _refund_call() -> None:
+    """Gives back a reservation when the provider rejected the call outright
+    (nothing was spent, so it must not eat the daily budget)."""
+    with _usage_lock:
+        if _usage["day"] == _today() and _usage["calls"] > 0:
+            _usage["calls"] -= 1
+            _save_usage()
+
+
 def usage_stats() -> dict:
     """For /admin/stats."""
     with _usage_lock:
@@ -214,14 +239,91 @@ def usage_stats() -> dict:
             "remaining": (limit - calls) if limit else None}
 
 
+# ── Provider rate limits (HTTP 429) ───────────────────────────────────────────
+# Short limits (per-minute tokens/requests) clear in seconds: wait and retry.
+# Long ones (the per-day token quota) will not clear while a user waits: fail
+# fast with a readable message instead of a raw provider error.
+
+_MAX_RETRY_WAIT_S = 20.0
+_MAX_RATE_RETRIES = 2
+_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(ms|h|m|s)(?![a-z])")
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    if getattr(exc, "status_code", None) == 429:
+        return True
+    text = str(exc).lower()
+    return "error code: 429" in text or "rate limit reached" in text or "rate_limit_exceeded" in text
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Seconds the provider asks us to wait: the Retry-After header, else its
+    'Please try again in 1m23.4s' text. None when neither is present."""
+    try:
+        header = exc.response.headers.get("retry-after")  # type: ignore[attr-defined]
+        if header:
+            return float(header)
+    except Exception:
+        pass
+    m = re.search(r"try again in ([0-9hms. ]+)", str(exc), re.IGNORECASE)
+    if not m:
+        return None
+    units = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
+    found = _DURATION_RE.findall(m.group(1))
+    return sum(float(num) * units[unit] for num, unit in found) if found else None
+
+
+def _human_wait(seconds: float) -> str:
+    if seconds >= 3600:
+        return f"about {math.ceil(seconds / 3600)} hour(s)"
+    if seconds >= 120:
+        return f"about {math.ceil(seconds / 60)} minutes"
+    return f"about {math.ceil(seconds)} seconds"
+
+
+def _rate_limit_message(daily: bool, wait: float | None) -> str:
+    if daily and (wait is None or wait > 120):
+        return ("The AI provider's daily usage quota has been used up, so this can't be "
+                "answered right now. The quota refills over the day - please try again later.")
+    if wait:
+        return f"The AI provider is rate-limiting requests. Please try again in {_human_wait(wait)}."
+    return "The AI provider is rate-limiting requests. Please try again shortly."
+
+
+def _call_primary(prompt: str, temperature: float, model: str, max_tokens: int) -> str:
+    """The primary provider with bounded retry on short 429s. Any other error
+    is re-raised untouched; a 429 that will not clear soon becomes
+    ProviderRateLimited."""
+    attempt = 0
+    while True:
+        try:
+            return _call_groq(prompt, temperature, model, max_tokens)
+        except Exception as exc:
+            if not _is_rate_limit(exc):
+                raise
+            wait = _retry_after_seconds(exc)
+            if wait is not None and wait <= _MAX_RETRY_WAIT_S and attempt < _MAX_RATE_RETRIES:
+                attempt += 1
+                print(f"[llm] rate limited on {model}; waiting {wait:.1f}s "
+                      f"(retry {attempt}/{_MAX_RATE_RETRIES})", flush=True)
+                time.sleep(wait + 0.5)
+                continue
+            daily = bool(re.search(r"per day|\(tpd\)|\(rpd\)", str(exc).lower()))
+            print(f"[llm] rate limit on {model}, giving up (daily={daily}, retry_after={wait}): "
+                  f"{str(exc)[:300]}", flush=True)
+            raise ProviderRateLimited(_rate_limit_message(daily, wait), daily=daily, retry_after=wait) from exc
+
+
 def _call(prompt: str, temperature: float, model: str, max_tokens: int = 2048) -> str:
     """Primary call, then the optional fallback provider. Raises only if
     every configured provider failed — callers handle that."""
     _reserve_call()
     slot = "chat" if model == _CHAT_MODEL else "code"
     try:
-        return _call_groq(prompt, temperature, model, max_tokens)
+        return _call_primary(prompt, temperature, model, max_tokens)
     except Exception as primary_error:
+        if isinstance(primary_error, ProviderRateLimited):
+            _refund_call()  # the provider rejected it; nothing was spent
         if not fallback_configured():
             raise
         print(f"[llm] primary ({model}) failed: {primary_error} — trying fallback provider", flush=True)

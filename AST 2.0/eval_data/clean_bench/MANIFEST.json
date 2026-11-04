@@ -1,0 +1,373 @@
+{
+ "generator_version": "1",
+ "profile": "full",
+ "vocab_sha256": "60e0dd8eed817b5d470e2ca256bd3fc54a9d2acacac3c2c09c8ccff73b2cb575",
+ "splits": {
+  "dev": {
+   "sha256": "c95ce8f77516770928daca877b5a668e5d5cd449ebe18560511a6a793680b27c",
+   "cases": {
+    "dev-orders-50-plain": {
+     "rows": 51,
+     "files": {
+      "customers.csv": "73993581517cea09425656bab05d67c7af01d4ca9bb65f4aed74f54c2b05c955",
+      "data.csv": "9bf388ff813cc3a1cc681a5092c44ee1274ec184c786f0c7458d82a6b27a9353",
+      "labels.json": "636547194f3077dee01da964c5e3cea01066e04b52b0eb393dee5a8ca146aa22",
+      "truth.csv": "fd858b3758149791ca49f918950d349a9ab51fabf614610a6e02950126a52a33"
+     }
+    },
+    "dev-orders-300-us": {
+     "rows": 301,
+     "files": {
+      "customers.csv": "2bb4f6ed7469c03dcda778238a7b6d282797ee9360ce26abccab721f928c0d2f",
+      "data.csv": "bbbcc2885774fd296fe60cabdfb71f50d2d24e5fce85d8ebb8e3d64cd0ea49c1",
+      "labels.json": "8451c2f0e9de51ee2e28c55b507e5d83bd368258f8c0d141c79f646878b32804",
+      "truth.csv": "aca03aa170e286847dcc5bc03f8278f86dddd0cdaf5c8348724a65f2c9f61b63"
+     }
+    },
+    "dev-orders-2000-india": {
+     "rows": 2005,
+     "files": {
+      "customers.csv": "80afcd939b3931bba0fd4d689969b307d18b7ab9a2456e9dd78a7490e23d0616",
+      "data.csv": "621961657639624d89589265aa3a8ed6761e3d92f265341715662d66af5e0404",
+      "labels.json": "27f0017e4b93f76ef0644668d152566510f11d0cfee7fba80fe478d4a2949804",
+      "truth.csv": "ab5727e01f8899b3d520d4e39abadcaf251aa37d6a42a7342a5feaa4cce62840"
+     }
+    },
+    "dev-orders-20000-plain": {
+     "rows": 20050,
+     "files": {
+      "customers.csv": "901007d77edb0b4c57ee2c5f065525247bff152cd2d33c65e181213c7433c3f5",
+      "data.csv": "1fde3f0ab9e1e2c533f3ada65b20efbcbde50439f316121cda456b40861fd78a",
+      "labels.json": "1ce4bd09d78edee3132002332862e796b19f439f0c98f750f72a804a86e87342",
+      "truth.csv": "0908ec44040d964b6a4607299681426475be4050ec45155c777e9bd6295e74c6"
+     }
+    },
+    "dev-staff-50-us": {
+     "rows": 51,
+     "files": {
+      "data.csv": "05c90cbdc92ca5ceeb3b35553686105d49b29c29559043062d91bff1e57a8ca0",
+      "labels.json": "9c425224f544569adb53a7369cfafd3db40b75de56c6e14f7b76927298389efb",
+      "truth.csv": "f4c5f398a501688d120f61af19d9ee02d973a235d8262b97ef104270229de0b3"
+     }
+    },
+    "dev-staff-300-plain": {
+     "rows": 301,
+     "files": {
+      "data.csv": "1945ebef4012754716b44e47e6d043262c902c42ef33d83684f3c214bf926809",
+      "labels.json": "0fed71facdc57e175e9af54d7915fc8e06038eff3d070b8a37375fb79effcbc7",
+      "truth.csv": "72652d919e20306b2c8c2631f04c3bb7226c969f9486bcdd9238033e0ea84cea"
+     }
+    },
+    "dev-staff-2000-india": {
+     "rows": 2005,
+     "files": {
+      "data.csv": "13582dc50852048ee4fcca6887abc21d368ec17f93bfeef27585e94e166933e6",
+      "labels.json": "e2bb98c5f38d10ddd0e8e6f00aae629186d47752d3a7e08cf579ab42b8119262",
+      "truth.csv": "010a3f5e770c165cb83cc09460f0343bf6876b707a5962886933f28fbe23f06c"
+     }
+    },
+    "dev-staff-20000-plain": {
+     "rows": 20050,
+     "files": {
+      "data.csv": "5dd5efe2c09c17fee316d5988561e2353fa7aba76553bacd5b7647d5c16a3fe4",
+      "labels.json": "8f46562ee5c182d683c413a233aa3be4e61bc5bf73524ad8e7378466d402afd4",
+      "truth.csv": "71c3cbb0773c909afb480914db08ce2219c2edf4a510ef830b429c8b49080d9d"
+     }
+    },
+    "dev-inventory-50-plain": {
+     "rows": 51,
+     "files": {
+      "data.csv": "1409b7619f269e965f52551f57593e3f6acdc964ab5df5083099fd2bde21dac6",
+      "labels.json": "d2f2520e72a50f98193f77c9d2772d06103fdc3983529f2242ead3cffe55e7d1",
+      "truth.csv": "810266580baa29a1c5fa9ab2e0e7b24cae70fd5f44d40e6dd7b72d9a598f1155"
+     }
+    },
+    "dev-inventory-300-india": {
+     "rows": 301,
+     "files": {
+      "data.csv": "d72273314e1be5f7ddde23e5e6b18d967fa80ec88b399244de81687536e8e998",
+      "labels.json": "1a06888bcd0761de8d90bab83584123a76fd8eeb32ac38f0835e80cddf4d7882",
+      "truth.csv": "aba80447645594f49fe51911fd2e9c988d244c9dbb94af7b6714b5a6e7326996"
+     }
+    },
+    "dev-inventory-2000-us": {
+     "rows": 2005,
+     "files": {
+      "data.csv": "ee5e67d4afc80d257c4e8bb0689114f0eb0d4820198dbb0d095fb9e0a0bfe307",
+      "labels.json": "6389dc8e802587b3aae420386a90514462578036f8916d7af015bd1b139257a8",
+      "truth.csv": "e3a8b143f46961966afe512521218a71744e316702f12cac708d7a99358dba3e"
+     }
+    },
+    "dev-inventory-20000-plain": {
+     "rows": 20050,
+     "files": {
+      "data.csv": "744cf939db7c137000c7471d1f427fe5b8f49dcf5e26490cd31f2456acc637ec",
+      "labels.json": "2368e38fdca59be8ab87e34f216241d774a5c3fa3be7cf012883de3ea289cab2",
+      "truth.csv": "e2b97475c2f26f902a131b006cade4a2252887e2d68eb52a380dbcbfb1bcafe0"
+     }
+    },
+    "dev-orders-1000-plain-ctrl": {
+     "rows": 1002,
+     "files": {
+      "customers.csv": "1ee9a4cd4108241a9c10ce9a84bb05e2ff73eac1eedcd14f7e8565a54f968038",
+      "data.csv": "95c9d293cc452889c333f80d9fba2118d58ed81d3a122cdf8d9632b9563ea271",
+      "labels.json": "a598495a4549e886f71122cb4b046c425e2367a864e1020d1f569dec65f53bc7",
+      "truth.csv": "1ecb744e2c4aed7fa50eede7822c8946b891c185556283857a402f464d2e9644"
+     }
+    },
+    "dev-staff-1000-plain-ctrl": {
+     "rows": 1002,
+     "files": {
+      "data.csv": "66fe7d5d7ffce89b58e6fabccffc6a9f82bbe91c4b5e12659b2ba7ef56f73474",
+      "labels.json": "22ad027a712f22efb19ee4f0612bcd815a6f4368f302ff09495edc4d9e8650fb",
+      "truth.csv": "97f1e840b9c90d3292b8daabe839669497a7959eb2c0bb173e38cd8c2adf53d2"
+     }
+    },
+    "dev-inventory-1000-plain-ctrl": {
+     "rows": 1002,
+     "files": {
+      "data.csv": "c258595d91a90057c6fe904f393fdf65c860d2197f03fa2dc6c4e6d1ce174da2",
+      "labels.json": "0cda2452f0ddb97ff386c8cbdd1c545b28020ccbca61d745c3a3b04866efdcce",
+      "truth.csv": "a972fc1a4e52b1b47d6942eb978b5775ae4d15af5cf1242ab42161f20f8bf392"
+     }
+    }
+   },
+   "label_counts": {
+    "decoy:heavy_tail_valid": 144,
+    "decoy:optional_null": 15,
+    "decoy:rare_valid_category": 27,
+    "decoy:refund_negative_amount": 77,
+    "decoy:same_attributes_distinct_key": 177,
+    "decoy:zero_stock_valid": 77,
+    "defect:blank_row": 215,
+    "defect:bom": 4,
+    "defect:boolean_mixed_encoding": 4,
+    "defect:category_variant": 103,
+    "defect:compound": 182,
+    "defect:date_ambiguous": 5,
+    "defect:date_locale_format": 5,
+    "defect:date_mixed_format": 93,
+    "defect:dup_exact": 100,
+    "defect:dup_near": 100,
+    "defect:end_before_start": 59,
+    "defect:footer_note": 10,
+    "defect:future_date": 100,
+    "defect:header_offset": 4,
+    "defect:impossible_value": 102,
+    "defect:lost_leading_zero": 67,
+    "defect:number_as_text": 80,
+    "defect:number_formatted_text": 8,
+    "defect:orphan_fk": 68,
+    "defect:outlier_magnitude": 103,
+    "defect:percent_scale": 32,
+    "defect:ragged_row": 13,
+    "defect:sentinel_null": 104,
+    "defect:swapped_values": 104,
+    "defect:total_row": 4,
+    "defect:trailing_delimiter": 1,
+    "defect:unit_mismatch": 36,
+    "defect:whitespace": 103
+   }
+  },
+  "frozen": {
+   "sha256": "1fd3bd10dbf4190e6d1264683b40dd57b501f5351209cd6afa042e5c28ebf97c",
+   "cases": {
+    "frozen-orders-60-eu": {
+     "rows": 61,
+     "files": {
+      "customers.csv": "38156fd7805e6a528f0e02beafaa58d41a20c284b073c97e2f0b9964e907972f",
+      "data.csv": "e43d4633756f59420c57bc41b984090026e728d2ae255a87de39da5ae31bbca7",
+      "labels.json": "c6f212b9990a79e53d8fd7ff483ec60613bf004971905dce78aaede278167f82",
+      "truth.csv": "a5eb31e3c69e9799f99cbc5a9bb6e780960cb6833fdfc87b4b1ed8d5c7a24d66"
+     }
+    },
+    "frozen-orders-500-swiss": {
+     "rows": 501,
+     "files": {
+      "customers.csv": "ee4d6ed2b997216216bb8f669f5e3dc321c8f53f302fa7de7a09e48f199fbfd2",
+      "data.csv": "27940b4d545c2bba58ba168965813827b1c4b3b8f0c8b90289759d8a7d969e6e",
+      "labels.json": "e583ac530aeeb1b8401de5934b3f1d6db3b73d506e988e8d021ac8de6808e9c2",
+      "truth.csv": "2ff569ab18d0a89912d5b14d07b48f34cbc20af68a8c321012ffb1e1faf51d14"
+     }
+    },
+    "frozen-orders-5000-suffix_code": {
+     "rows": 5012,
+     "files": {
+      "customers.csv": "08277926ece353526f5149212be2fbb0bc2c65da9eec3ec0da6cd0817f10e3f6",
+      "data.csv": "a3b79e0e712a541000f25c97ba8cc7aeecc35823b16f3ae24174191d4284cacc",
+      "labels.json": "582b56e2356c86f94f50fb855ff3215dc20d9109c3cd4f66cc765d2c643a8514",
+      "truth.csv": "521e31da177dcf77e5570a2d0e67d83675e8b1a8ec1f212a14874ca87cdfb67f"
+     }
+    },
+    "frozen-orders-40000-eu": {
+     "rows": 40100,
+     "files": {
+      "customers.csv": "8130ff250c5be99217dc801b779f0e51f304e665b014be6732123387c2a8547b",
+      "data.csv": "3f1a58e9ff615fcf7bf857847378a482bbca70d84f94931e41faba564d9fddb1",
+      "labels.json": "b53cf1afb8810bc04d3da95a5dd94b0ce708013289afec82b9598bafe77d3f53",
+      "truth.csv": "7bf6bfbed7a8258b6284b709a57803923097869d50df47ae091a2da2f1c8a61a"
+     }
+    },
+    "frozen-staff-80-swiss": {
+     "rows": 81,
+     "files": {
+      "data.csv": "cd60978a14fd613c0ed35cfafedaa0ded5a025a3c8fb7300f2aeea2c12d80c8b",
+      "labels.json": "bd7a139d894d108a31bf4f134cf8adedccfab1edd3a7d1abcd9625399b667cfd",
+      "truth.csv": "79e2258972b2e08636cec8792af59bfaca32361aef2734160d1c0ec1acfa96d2"
+     }
+    },
+    "frozen-staff-700-suffix_code": {
+     "rows": 701,
+     "files": {
+      "data.csv": "02cf36d73f562c9d83908f39771b84f5542a33879f4ff1aab2c6df86deaa889c",
+      "labels.json": "27285c8be9d24377be90c46d0b9117638df835c45782f292a61c1458ceab3692",
+      "truth.csv": "86354dc0c10349bfed0bd2fd611d9cdeb439c613f68a3bb48c1e0ab8d0e2c07c"
+     }
+    },
+    "frozen-staff-6000-eu": {
+     "rows": 6015,
+     "files": {
+      "data.csv": "e578abc3b5eb6a764fd63bd5d980af2918d0d2cb4f36b78c9f166f601158f94d",
+      "labels.json": "71c71f1bcdef6b9b89ec085b9dbe99039f57b52576828a09cf77f5a7205c015a",
+      "truth.csv": "904b946c9652e67c57b71f5944d9ae175e6a9f8f150521c2187eb312bdc760dd"
+     }
+    },
+    "frozen-staff-30000-swiss": {
+     "rows": 30075,
+     "files": {
+      "data.csv": "4e47f1df9b85ba8ba330ca7ad19df9de647342f6d17b3973ba44eea4acab6bb2",
+      "labels.json": "87db7d3198f905b67e1d75e4c5680c71bbbb60776275ab19afe689d46b5c6b29",
+      "truth.csv": "3b092e746de50f39129b71677366e7614b44693f070113de2c0d789f798e93ba"
+     }
+    },
+    "frozen-inventory-70-eu": {
+     "rows": 71,
+     "files": {
+      "data.csv": "65ecd524d919b6089e82afd7d00333028105a0cc70f49df3145a676a6e76f178",
+      "labels.json": "98cc1d8ad4ea1ada8dc511878e382aa7f411822da11c3d71b466e0e9aa4e8a3a",
+      "truth.csv": "61bde6dedabb74a7d191398c728780a174d809dd5d21a50de66748bb16415ae2"
+     }
+    },
+    "frozen-inventory-600-suffix_code": {
+     "rows": 601,
+     "files": {
+      "data.csv": "4b07e547d27d6a3c2fe439d0315453266d72038c96b8dc02b06f005adc869907",
+      "labels.json": "45c683b3d96ca52838ee34e5fb00396296a4e68af2d1b7409dc4e4d89fa47528",
+      "truth.csv": "8cce98905e0a82597b6dae140ff4fe78eb058599c6cf7fb8fc3fb74bf99556d4"
+     }
+    },
+    "frozen-inventory-4000-swiss": {
+     "rows": 4010,
+     "files": {
+      "data.csv": "e1cd3e0033a407b8987c440caed2a258bbd9e5e02e3e699d6b51d4805531eb17",
+      "labels.json": "b7d93702bee36cf1d9e9d420359b178333d14593c6708ef29ede812a3ae2250d",
+      "truth.csv": "db56b92be2d03118b42dfe1cf394ef77a53c001a7004349f1eb5671f03bf06c1"
+     }
+    },
+    "frozen-inventory-30000-eu": {
+     "rows": 30075,
+     "files": {
+      "data.csv": "f71a747212b387702ca5b5890698f34319700b4c0755a2e1bdbf594f717eac1f",
+      "labels.json": "9706d661cab34a02b28f335d3206c0b4efeb8e455b7195ce74c2c25e7525a118",
+      "truth.csv": "3b895684b0f056f6f09c448101c004a890d2a3f02660ab786db57c70e0dc67e5"
+     }
+    },
+    "frozen-orders-6000-plain": {
+     "rows": 6015,
+     "files": {
+      "customers.csv": "c82b42f12f862f076d724a1fc4b3a8a3fa4f86582a93c5036a0d7794df37b135",
+      "data.csv": "04e94355ff948b1775f57bf27b8194d5e235806dcff58b06b965960992824bb4",
+      "labels.json": "b7ffc09de39abf600ae813f655f7ec96c131934bd4ec1fbb4905b7ce7fef5eaf",
+      "truth.csv": "0329f5490e0fb26444290372180d1f5dee073ca17a12b082ad656e662b83c254"
+     }
+    },
+    "frozen-inventory-2500-plain": {
+     "rows": 2506,
+     "files": {
+      "data.csv": "b622e5cedb807a2712736660990d962ec83292a7eaa480c2200794f08c2c111e",
+      "labels.json": "f78c2e50287a88a2ac84fa6b0bc781cc799c688710c18ef6aa167539259d1f03",
+      "truth.csv": "db0e9400d8ec3bac73bf1beb9bcd41ce2d1bcbbf2c4e185820696d24a40adac5"
+     }
+    },
+    "frozen-staff-400-plain": {
+     "rows": 401,
+     "files": {
+      "data.csv": "714cb0bde9fd0b523a0459aa6e7bda34865e82ce4aa5808dedaacbb84fc5cb1e",
+      "labels.json": "853093a6d23e2ea1e79a398f9cd8b513544fbe5a0c2fbc5a96d534507c20b86c",
+      "truth.csv": "74e66c76231d2d979d5eb014063c04afa8b8f1b64f15922d714d6a41a97f557a"
+     }
+    },
+    "frozen-orders-400-plain": {
+     "rows": 401,
+     "files": {
+      "customers.csv": "84cf2f5e901fe86d1f4398a197c67a44c1e819df14f39634bfb372844580cca0",
+      "data.csv": "cc82e4598aed9482f16925a8ffd5c6e201c39ffb5ee752eceb7c937b10fcadf3",
+      "labels.json": "5f3751cbf62f3802dc344ae83b7c981378e03398ae0a6416fc9d4960cc670952",
+      "truth.csv": "0ecff15a3621c9b5968b01521dc74ca2e50cfa908982fd4d8673bca8d16ef8cf"
+     }
+    },
+    "frozen-orders-1500-plain-ctrl": {
+     "rows": 1503,
+     "files": {
+      "customers.csv": "f670b81684a561910baa36b78b6a784b06770c32cb5f53d14f9bf87b093285cc",
+      "data.csv": "3539bffc38b2ed95aeed734c926a3983bf433dec5b1d44cd364fe4a883aaddd3",
+      "labels.json": "6e2d207092c73d8fb760db3fcf465df1d98730b58c4b097d0e49b265daecda32",
+      "truth.csv": "2d8c44875c05a6909418fa38cbad0c4b24cc061cf853149f4e01ac446dcba909"
+     }
+    },
+    "frozen-staff-1500-plain-ctrl": {
+     "rows": 1503,
+     "files": {
+      "data.csv": "57517c3272227fb523d121ed13d8590121872c78a0ea3f441d600fc2c53fb88f",
+      "labels.json": "8a724620fe99dac51c859cf480ffc77121ae5eebafda1cae46803b59c8795086",
+      "truth.csv": "86554cab72869727b79b4dea9483f878979f47395173301796aa5c4743483235"
+     }
+    },
+    "frozen-inventory-1500-plain-ctrl": {
+     "rows": 1503,
+     "files": {
+      "data.csv": "2496e0f3d612a835f3d501fe5fd0c7ff7d0007fd0fe53cde8f3e8582cc4c89fa",
+      "labels.json": "bf811f69af3e6ce6c0cc274b25b82b5769e31f516ab477088754ca19db42f360",
+      "truth.csv": "616a0ed27ecdc21188cdc4b92938572759346405f9a122a77a99b339b748be12"
+     }
+    }
+   },
+   "label_counts": {
+    "decoy:heavy_tail_valid": 264,
+    "decoy:optional_null": 19,
+    "decoy:rare_valid_category": 35,
+    "decoy:refund_negative_amount": 177,
+    "decoy:same_attributes_distinct_key": 325,
+    "decoy:zero_stock_valid": 129,
+    "defect:blank_row": 561,
+    "defect:bom": 6,
+    "defect:boolean_mixed_encoding": 4,
+    "defect:category_variant": 242,
+    "defect:compound": 284,
+    "defect:date_ambiguous": 7,
+    "defect:date_locale_format": 17,
+    "defect:date_mixed_format": 234,
+    "defect:dup_exact": 242,
+    "defect:dup_near": 242,
+    "defect:end_before_start": 165,
+    "defect:footer_note": 13,
+    "defect:future_date": 242,
+    "defect:header_offset": 5,
+    "defect:impossible_value": 242,
+    "defect:lost_leading_zero": 172,
+    "defect:number_as_text": 42,
+    "defect:number_formatted_text": 16,
+    "defect:orphan_fk": 171,
+    "defect:outlier_magnitude": 243,
+    "defect:percent_scale": 99,
+    "defect:ragged_row": 206,
+    "defect:sentinel_null": 243,
+    "defect:swapped_values": 243,
+    "defect:total_row": 5,
+    "defect:trailing_delimiter": 2,
+    "defect:unit_mismatch": 72,
+    "defect:whitespace": 241
+   }
+  }
+ }
+}

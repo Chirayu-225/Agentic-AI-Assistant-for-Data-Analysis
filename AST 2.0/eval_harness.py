@@ -355,6 +355,11 @@ def classify_failure(error: str) -> str:
         return "security_block"
     if "no shortcut" in e:
         return "needs_llm"
+    # The model PROVIDER was unavailable (rate limit / daily quota). That says
+    # nothing about answer quality, so it is kept out of accuracy (summarize).
+    if ("429" in e and "rate limit" in e) or "daily ai usage limit" in e \
+            or ("ai provider" in e and ("rate-limiting" in e or "quota" in e)):
+        return "infra_error"
     if "memory limit" in e:
         return "memory_limit"
     if "execution limit" in e or "timed out" in e or "timeout" in e:
@@ -478,6 +483,11 @@ def _percentile(sorted_vals: list[float], pct: float) -> float:
 
 
 def summarize(results: list[QuestionResult], repeat: int = 1) -> dict:
+    # Provider outages (outcome "infra_error") are not wrong answers: count and
+    # report them, but score accuracy only over runs that could be answered.
+    all_results = results
+    results = [r for r in all_results if r.outcome != "infra_error"]
+    infra = len(all_results) - len(results)
     n = len(results)
     correct = sum(r.correct for r in results)
     executed = sum(r.executed for r in results)
@@ -486,7 +496,7 @@ def summarize(results: list[QuestionResult], repeat: int = 1) -> dict:
     ex_lo, ex_hi = wilson_interval(executed, n)
 
     outcomes: dict[str, int] = {}
-    for r in results:
+    for r in all_results:
         outcomes[r.outcome] = outcomes.get(r.outcome, 0) + 1
 
     by_cat: dict[str, dict] = {}
@@ -521,6 +531,7 @@ def summarize(results: list[QuestionResult], repeat: int = 1) -> dict:
         "questions": len({r.id for r in results}),
         "runs": n,
         "repeat": repeat,
+        "infraErrors": infra,
         "accuracy": round(correct / n, 3) if n else 0,
         "accuracy95": [round(acc_lo, 3), round(acc_hi, 3)],
         "executionSuccess": round(executed / n, 3) if n else 0,
@@ -554,6 +565,10 @@ def render_report(summary: dict, results: list[QuestionResult], meta: dict) -> s
         f"- Latency per question: mean {summary['latencySeconds']['mean']}s, median {summary['latencySeconds']['median']}s, "
         f"p95 {summary['latencySeconds']['p95']}s, max {summary['latencySeconds']['max']}s",
     ]
+    if summary.get("infraErrors"):
+        L.append(f"- **WARNING: {summary['infraErrors']} run(s) failed because the model provider was "
+                 f"unavailable (rate limit / quota). They are EXCLUDED from accuracy above; "
+                 f"re-run once the quota resets for a complete result.**")
     if summary["consistency"] is not None:
         L.append(f"- Consistency across repeats: {pct(summary['consistency'])} "
                  f"(how often repeated runs of the same question gave the same answer)")

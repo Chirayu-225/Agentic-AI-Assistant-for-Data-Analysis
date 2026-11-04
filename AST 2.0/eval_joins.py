@@ -89,7 +89,7 @@ def main(argv=None) -> int:
         print("GROQ_API_KEY is not set.", file=sys.stderr)
         return 2
 
-    from eval_harness import wilson_interval
+    from eval_harness import classify_failure, wilson_interval
     from multi_table_service import run_multi_table_query
 
     datasets = []
@@ -107,12 +107,23 @@ def main(argv=None) -> int:
             res = run_multi_table_query(datasets, q["question"], f"eval-joins-{q['id']}-run{run}")
             ok, why = score(res, q["expected"], q["answer_type"], tol)
             first = (res.get("resultData") or [{}])[0]
+            infra = classify_failure(str(res.get("error") or "")) == "infra_error"
             rows.append({"id": q["id"], "run": run, "correct": ok, "trap": q["trap"], "why": why,
+                         "infra": infra,
                          "seconds": round(time.time() - t0, 1), "sql": res.get("code", ""),
                          "signature": _signature(res)})
             print(f"[{'OK  ' if ok else 'FAIL'}] {q['id']}#{run} {q['question'][:62]}"
                   + (f"  [{q['trap']}]" if q["trap"] else "") + ("" if ok else f"  <- {why}"), flush=True)
 
+    # Provider rate-limit / quota failures are not wrong SQL: exclude and report.
+    infra_n = sum(r["infra"] for r in rows)
+    rows = [r for r in rows if not r["infra"]]
+    if infra_n:
+        print(f"\nWARNING: {infra_n} run(s) hit the model provider's rate limit / quota and were EXCLUDED "
+              f"from accuracy. Re-run after the quota resets.")
+    if not rows:
+        print("No run could be scored (provider unavailable) - nothing written.")
+        return 1
     k, n = sum(r["correct"] for r in rows), len(rows)
     lo, hi = wilson_interval(k, n)
     trap = [r for r in rows if r["trap"]]
@@ -129,7 +140,7 @@ def main(argv=None) -> int:
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "accuracy": round(k / n, 3), "accuracy95": [round(lo, 3), round(hi, 3)], "runs": n,
         "trapAccuracy": round(sum(r["correct"] for r in trap) / len(trap), 3) if trap else None,
-        "consistency": consistency, "results": rows,
+        "consistency": consistency, "infraErrors": infra_n, "results": rows,
     }
     out_dir = os.path.join(HERE, "eval_results", "joins")
     os.makedirs(out_dir, exist_ok=True)

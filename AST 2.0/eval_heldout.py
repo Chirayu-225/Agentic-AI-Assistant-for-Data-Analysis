@@ -66,6 +66,10 @@ def main(argv=None) -> int:
         per_set[data_name] = summary
         pooled.extend(results)
 
+    # Runs the provider could not serve (rate limit / quota) are not wrong
+    # answers: drop them from scoring and report how many there were.
+    infra = sum(r.outcome == "infra_error" for r in pooled)
+    pooled = [r for r in pooled if r.outcome != "infra_error"]
     k, n = sum(r.correct for r in pooled), len(pooled)
     lo, hi = wilson_interval(k, n)
     by_cat: dict[str, list[int]] = {}
@@ -94,6 +98,7 @@ def main(argv=None) -> int:
 
     combined = {
         "solver": args.solver, "repeat": args.repeat, "runs": n, "correct": k,
+        "infraErrors": infra,
         "consistency": consistency,
         "rightOnEveryRun": consistent_and_right if args.repeat > 1 else None,
         "accuracy": round(k / n, 3) if n else 0.0, "accuracy95": [round(lo, 3), round(hi, 3)],
@@ -107,6 +112,9 @@ def main(argv=None) -> int:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(combined, f, indent=2)
 
+    if infra:
+        print(f"\nWARNING: {infra} run(s) hit the model provider's rate limit / quota and were EXCLUDED "
+              f"from accuracy. This result is incomplete - re-run after the quota resets.")
     print(f"\nHELD-OUT accuracy {combined['accuracy'] * 100:.1f}% "
           f"(95% interval {lo * 100:.1f}–{hi * 100:.1f}%, {k}/{n} runs)")
     for c, v in combined["byCategory"].items():
