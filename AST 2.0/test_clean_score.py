@@ -35,6 +35,8 @@ check("leading zeros are real differences in identifiers", cs.norm("idnum", "042
 check("adapter: 1234.50 and 1234.5 are the same value", ca.same_value("1234.50", 1234.5))
 check("adapter: an ID that lost its leading zero IS a change", not ca.same_value("042425", "42425"))
 check("adapter: whitespace around text is a change", not ca.same_value(" x ", "x"))
+check("adapter: whitespace around a NUMBER is a change too (a padded ID that was trimmed is a fix)", not ca.same_value("  13220", "13220") and not ca.same_value("13220", " 13220"))
+check("adapter: a number that merely gained '.0' is still the same value", ca.same_value("13220", "13220.0"))
 check("adapter: a boolean read as text and written back ('true' -> 'True') is not an edit", ca.same_value("true", "True") and not ca.same_value("true", "false"))
 
 # ── adapter core: source coordinates survive dropped rows ────────────────────

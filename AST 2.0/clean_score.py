@@ -283,7 +283,8 @@ class Agg:
                   "rows_removed_silent": 0, "decoy_rows_removed": 0, "good_cells": 0, "cells_corrupted": 0,
                   "cells": 0, "cells_ok_before": 0, "cells_ok_after": 0, "ctl_cells": 0, "ctl_touched": 0,
                   "ctl_rows": 0, "ctl_removed": 0, "preds": 0, "on_defect": 0, "on_decoy": 0, "on_clean": 0,
-                  "ask_n": 0, "ask_asked": 0, "ask_autofixed": 0, "ask_unsupported": 0, "fix_n": 0, "over_ask": 0}
+                  "ask_n": 0, "ask_asked": 0, "ask_autofixed": 0, "ask_unsupported": 0, "fix_n": 0, "over_ask": 0,
+                  "gate": []}
 
     def bump(self, defect: str, key: str, n: int = 1):
         c = self.d.setdefault(defect, {"n": 0, "unsupported": 0, "detected": 0, "correct": 0, "wrong": 0, "silent": 0,
@@ -294,6 +295,11 @@ class Agg:
 def score_case(case: Case, doc: dict, agg: Agg) -> None:
     pi, m = PI(doc, case), agg.m
     m["cases"] += 1
+    g = doc.get("gate")
+    if g is not None:
+        m["gate"].append({"case": case.id, "control": case.control, "asked": g["asked"], "kinds": g["kinds"],
+                          "truth_header": case.meta["header_line"], "chosen_header": pi.structure.get("header_line"),
+                          "decided": bool(g["header"].get("decided")), "asks": g["asks"]})
     if not pi.ok:
         m["cases_failed"] += 1
         m["failed"].append((case.id, pi.error))
@@ -435,6 +441,10 @@ def finish(agg: Agg) -> dict:
                        "over_ask_rate": rate(m["over_ask"], m["fix_n"])},
         "precision": {"interventions": m["preds"], "on_defect": m["on_defect"], "on_decoy": m["on_decoy"],
                       "on_clean": m["on_clean"], "precision": rate(m["on_defect"], m["preds"])},
+        "gate": ({"cases": len(m["gate"]), "asked": sum(g["asked"] for g in m["gate"]),
+                  "asked_controls": sum(g["asked"] and g["control"] for g in m["gate"]),
+                  "header_right_when_decided": sum(1 for g in m["gate"] if not g["asked"] and g["chosen_header"] == g["truth_header"]),
+                  "decided": sum(1 for g in m["gate"] if not g["asked"]), "detail": m["gate"]} if m["gate"] else None),
     }
 
 
@@ -466,6 +476,18 @@ def render(r: dict, title: str, show_failures: bool) -> str:
           "", "-- ask vs fix --",
           f"ambiguous date columns: {av['ambiguous_columns']} (unsupported: {av['unsupported']}), asked: {av['asked']}, autofixed: {av['autofixed']}",
           f"over-ask: asked where a fix was right on {av['over_ask']} of {av['fix_labels']} fix labels ({pct(av['over_ask_rate']).strip()})"]
+    gt = r.get("gate")
+    if gt:
+        L += ["", "-- structure gate: asked vs decided --",
+              f"decided on {gt['decided']} of {gt['cases']} cases (header right on {gt['header_right_when_decided']} of them); "
+              f"asked on {gt['asked']} ({gt['asked_controls']} of them controls)"]
+        if show_failures:
+            for g in gt["detail"]:
+                tag = "ASKED  " if g["asked"] else "decided"
+                ok = "header correct" if g["chosen_header"] == g["truth_header"] else f"header WRONG (chose {g['chosen_header']}, truth {g['truth_header']})"
+                L.append(f"  {tag} {g['case']:<34}{('[' + ', '.join(g['kinds']) + '] ') if g['asked'] else ''}{ok}")
+                for a in g["asks"]:
+                    L += [f"            candidate line {c['line']}: {c['text'][:80]}" for c in a["candidates"]]
     if show_failures and r["failed"]:
         L += ["", "-- crashed cases --"] + [f"{cid}: {err[:150]}" for cid, err in r["failed"]]
     return "\n".join(L)
@@ -550,6 +572,9 @@ def make_pipeline(name: str, cases: list) -> Callable:
         return reference_pipeline(name, cases)
     if name == "legacy":
         from clean_adapter_legacy import run
+        return run
+    if name == "stage0":
+        from clean_adapter_stage0 import run
         return run
     raise SystemExit(f"unknown adapter '{name}'")
 
@@ -639,6 +664,13 @@ def main(argv=None, git: Callable = git_state, log_path: str = RUN_LOG, now: Opt
     cases = load_cases(a.profile, split)
     result = score(cases, make_pipeline(a.adapter, cases))
     print(render(result, f"{a.adapter} @ {split}", show_failures=not a.frozen))
+    if a.adapter == "stage0":
+        import stage0_targets
+        checks = stage0_targets.check(result)
+        print("\n-- Stage 0 targets (fixed in stage0_targets.py before this run) --")
+        for name, ok, detail in checks:
+            print(f"  {'PASS' if ok else 'MISS'}  {name:<42}{detail}")
+        print(f"  {sum(ok for _, ok, _ in checks)} of {len(checks)} met")
     if a.frozen:
         print("\n(frozen: per-case failures are not shown, by design)")
         append_log(log_path, now, commit, a.adapter, result)

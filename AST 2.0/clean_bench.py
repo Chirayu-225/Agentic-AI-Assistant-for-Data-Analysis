@@ -126,9 +126,12 @@ VOCAB = {
         "bool_encodings": [["Y", "N"], ["yes", "no"], ["1", "0"], ["TRUE", "FALSE"]],
         "unit_pairs": [["kg", "g", 1000], ["m", "cm", 100]],
         "whitespace": [" ", "  ", "\t"],
+        # lines above the header: plain one-field titles and a real blank line
+        "title_lines": [["Data export"], ["Generated 2025-12-31 by ERP"], [], ["Prepared for: Finance"]],
+        "title_pad": [False],
     },
     "frozen": {
-        "sentinels": ["#N/A", "?", "unknown", "tba", "nil", "not available", "(blank)", "\u2014", "XXX"],
+        "sentinels": ["n.a.", "?", "unknown", "tba", "nil", "not available", "(blank)", "\u2014", "XXX"],
         "numeric_sentinels": ["-999", "99999"],
         "date_formats": ["%d.%m.%Y", "%Y/%m/%d", "%d %B %Y", "%b %d, %Y", "%Y%m%d"],
         "number_text_forms": ["suffix_usd", "space_group", "apostrophe"],
@@ -137,6 +140,9 @@ VOCAB = {
         "bool_encodings": [["T", "F"], ["on", "off"], ["enabled", "disabled"], ["1.0", "0.0"]],
         "unit_pairs": [["l", "ml", 1000], ["km", "m", 1000]],
         "whitespace": ["\u00a0", " \u00a0", "\u3000"],
+        # Excel-style: titles padded with delimiters to the table width, a key/value line, an empty padded row
+        "title_lines": [["Quarterly report"], ["Exported by", "ERP v4.2"], [""], ["Period", "2025-Q4"]],
+        "title_pad": [True],
     },
 }
 LOCALES = {  # name -> (primary date format, money style)
@@ -395,7 +401,6 @@ class CaseSpec:
         return f"{self.split}-{self.family}-{self.n_rows}-{self.locale}" + ("-ctrl" if self.rate == 0 else "")
 
 
-JUNK = [["Data export"], ["Generated 2025-12-31 by ERP"], [], ["Prepared for: Finance"]]
 FOOT = ["Source: ERP export v4.2", "Confidential - internal use only", "Rows may be revised after month-end close"]
 _SCOPE_ORDER = {"file": 0, "structure": 1, "column": 2, "row": 3, "cell": 4}
 
@@ -968,7 +973,8 @@ def build_case(spec: CaseSpec):
     b = spec.bundle
     body: list = []
     hl = b.get("header_line", 1)
-    body += [R("junk", list(JUNK[j])) for j in range(hl - 1)]
+    pad = c.vocab["title_pad"][0]
+    body += [R("junk", list(t) + [""] * (len(c.cols) - len(t)) if pad else list(t)) for t in c.vocab["title_lines"][: hl - 1]]
     header = R("header", [col.name for col in c.cols])
     body.append(header)
     body += c.rows

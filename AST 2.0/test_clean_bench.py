@@ -56,10 +56,12 @@ frozen_tokens = set()
 fv = cb.VOCAB["frozen"]
 for slot in ("sentinels", "numeric_sentinels", "date_formats"):
     frozen_tokens |= set(fv[slot])
+frozen_tokens |= {t for line in fv["title_lines"] for t in line}
 for pair in fv["bool_encodings"]:
     frozen_tokens |= set(pair)
 leaks = {}
-for fname in ("cleaning.py", "cleaning_agent.py", "profiler.py", "pii_redaction.py", "file_reader.py", "table_extraction.py", "clean_schema.py"):
+for fname in ("cleaning.py", "cleaning_agent.py", "profiler.py", "pii_redaction.py", "file_reader.py", "table_extraction.py", "clean_schema.py",
+              "clean_read.py", "clean_adapter_stage0.py"):
     p = os.path.join(HERE, fname)
     if os.path.exists(p):
         text = open(p, encoding="utf-8").read()
@@ -180,6 +182,11 @@ for split in ("dev", "frozen"):
         hl = b.get("header_line", 1)
         want = names + ([""] if b.get("trailing_delim") else [])
         check(f"{spec.case_id}: header sits on line {hl}", lines[hl] == want, lines.get(hl))
+        if hl > 1:
+            above = [lines[i] for i in range(1, hl)]
+            padded = cb.VOCAB[split]["title_pad"][0]
+            check(f"{spec.case_id}: the {hl - 1} line(s) above the header are title lines" + (" padded to the table width" if padded else ""),
+                  all(len(r) == len(names) for r in above if r or padded) if padded else all(len(r) <= 2 for r in above), above)
         for L in doc["labels"]:
             if L["defect"] == "ragged_row":
                 actual = len(lines[L["line"]]) - (1 if b.get("trailing_delim") else 0)

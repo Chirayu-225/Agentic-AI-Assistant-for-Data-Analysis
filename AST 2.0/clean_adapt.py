@@ -20,9 +20,10 @@ Rules the adapter keeps, because the baseline is only fair if it does:
   * A blank line the file reader skipped is not a cleaner action: it is
     reported as "ignore" at its line.
   * Boolean literals compare case-insensitively ("true" == "True").
-  * Numbers compare by value ("1234.50" == 1234.5) but leading zeros stay
-    significant ("042425" != "42425"), so an ID mangled into an integer is a
-    visible change, not an invisible one.
+  * Numbers compare by value ("1234.50" == 1234.5) but leading zeros and
+    surrounding whitespace stay significant ("042425" != "42425",
+    "  13220" != "13220"), so an ID mangled into an integer, or a padded value
+    that was trimmed, is a visible change, not an invisible one.
   * A cleaner that cannot say "ask" or "flag" declares that in `capabilities`;
     the scorer then reports those labels as "action not supported", not as misses.
 """
@@ -44,9 +45,9 @@ def norm_col(name) -> str:
 
 
 def _canon(s: str) -> str:
-    t = s.strip()
-    if _NUM.match(t):
-        return t.rstrip("0").rstrip(".") if "." in t else t
+    # No strip: whitespace around a number ("  13220") is a real difference, not formatting.
+    if _NUM.match(s):
+        return s.rstrip("0").rstrip(".") if "." in s else s
     return s
 
 
