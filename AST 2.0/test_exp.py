@@ -169,6 +169,70 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the guard prints the run number and last run first", er.guard_llm(questions, git=clean_git)[1][0].startswith("EXPERIMENT RUN #1"))
     er.PREREG, er.RUNS_LOG = old
 
+def rec(qid, arm, rep, outcome, note=False, tier="single", kind="value", tag="x"):
+    return {"qid": qid, "arm": arm, "repeat": rep, "outcome": outcome, "note": note, "tier": tier, "kind": kind, "tag": tag, "actual": "v", "solver": "llm",
+            "pass": "full", "calls": 1, "tokens_prompt": 10, "tokens_completion": 5}
+
+# ── a refused cell is retried, never left as a hole; pace mode waits out the provider's refilling quota ──
+QUOTA = {"success": False, "resultType": "error", "resultData": None,
+         "error": "The AI provider's daily usage quota has been used up, so this can't be answered right now."}
+one_q = [q for q in questions if q["tag"] == "footer"][:1]
+def scripted(plan):
+    state = {"n": 0}
+    def solver(data, q, customers, session):
+        i = state["n"]
+        state["n"] += 1
+        step = plan[i] if i < len(plan) else "ok"
+        if step == "quota":
+            return dict(QUOTA)
+        if step == "interrupt":
+            raise KeyboardInterrupt
+        return er.mechanical_solver(data, q, customers, session)
+    return solver
+def drive(plan, pace, max_attempts=None):
+    sleeps, orig_sleep, orig_wait, orig_att = [], er.SLEEP, er.provider_wait, er.MAX_PACE_ATTEMPTS
+    er.SLEEP, er.provider_wait = sleeps.append, lambda rec: 7.0
+    if max_attempts is not None:
+        er.MAX_PACE_ATTEMPTS = max_attempts
+    orig = er.SOLVERS["mechanical"]
+    er.SOLVERS["mechanical"] = scripted(plan)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "r.jsonl")
+        summ = er.run_pass("mechanical", "t", "single", 1, 0, path, one_q, cases, out=lambda *_: None, pace=pace)
+        recs = [json.loads(l) for l in open(path)]
+        again = None
+        if not pace:
+            er.SOLVERS["mechanical"] = scripted([])          # a healthy provider on the second invocation
+            again = er.run_pass("mechanical", "t", "single", 1, 0, path, one_q, cases, out=lambda *_: None)
+            recs = [json.loads(l) for l in open(path)]
+    er.SOLVERS["mechanical"], er.SLEEP, er.provider_wait, er.MAX_PACE_ATTEMPTS = orig, orig_sleep, orig_wait, orig_att
+    return summ, recs, sleeps, again
+
+summ, recs, _, again = drive(["ok", "quota"], pace=False)
+check("without --pace a quota error stops the run after recording it", summ["stopped"] == "daily_quota" and [r["outcome"] for r in recs[:2]] == ["correct", "infra_error"])
+check("on resume the refused cell is run AGAIN (an infra error is not a result), and only the unfinished cells run",
+      again["runs"] == 2 and [(r["arm"], r["outcome"]) for r in recs] == [("clean", "correct"), ("dirty", "infra_error"), ("dirty", "wrong" if recs[2]["outcome"] == "wrong" else "correct"), ("stage0", recs[3]["outcome"])], [(r["arm"], r["outcome"]) for r in recs])
+m, inf = ea.collapse(recs)
+check("the refused attempt stays in the file, counted as infra and excluded from every rate", inf[(one_q[0]["id"], "dirty")] == 1 and (one_q[0]["id"], "dirty") in m and m[(one_q[0]["id"], "dirty")]["n"] == 1)
+summ, recs, sleeps, _ = drive(["ok", "quota", "quota"], pace=True)
+check("--pace waits out the provider and retries the SAME run until it is served (no substitution, no stop)",
+      summ["stopped"] is None and sleeps == [7.0, 7.0] and [(r["arm"], r["outcome"]) for r in recs][:4] == [("clean", "correct"), ("dirty", "infra_error"), ("dirty", "infra_error"), ("dirty", recs[3]["outcome"])] and len(recs) == 5, (sleeps, [(r["arm"], r["outcome"]) for r in recs]))
+summ, recs, sleeps, _ = drive(["ok"] + ["quota"] * 20, pace=True, max_attempts=2)
+check("--pace is bounded: it gives up on a run that is refused over and over, and says so", summ["stopped"] == "gave_up" and len(sleeps) == 2, (summ["stopped"], sleeps))
+summ, recs, _, _ = drive(["ok", "interrupt"], pace=False)
+check("Ctrl-C stops cleanly: finished runs are kept and the stop reason is reported (so the log line is still written)", summ["stopped"] == "interrupted" and len(recs) >= 1 and recs[0]["outcome"] == "correct", summ)
+import llm_provider as lp
+lp._tls.last_rate_limit = {"retry_after": 532.0, "daily": True}
+check("the wait is the provider's own retry-after plus a margin", er.provider_wait({"detail": "x"}) == 547.0)
+lp._tls.last_rate_limit = {"retry_after": 99999.0, "daily": True}
+check("... capped at an hour, so a pathological value cannot hang the run for days", er.provider_wait({"detail": "x"}) == 3600.0)
+lp.clear_last_rate_limit()
+check("with no retry-after it falls back to conservative defaults", er.provider_wait({"detail": "The daily AI usage limit for this demo"}) == 900.0 and er.provider_wait({"detail": "429"}) == 120.0)
+rep = ea.report([dict(rec("a1", "clean", 1, "correct"), tag="x", calls=1), dict(rec("a1", "dirty", 1, "correct"), tag="x", calls=0),
+                 dict(rec("a2", "dirty", 1, "crash"), tag="x", calls=0)], [{"id": "a1", "tag": "x", "tier": "single", "kind": "value", "expected": "1", "question": "?"},
+                 {"id": "a2", "tag": "x", "tier": "single", "kind": "value", "expected": "1", "question": "?"}])
+check("the report names the questions the model never saw (answered by the rule-based shortcut), but not crashes", "WITHOUT the model" in rep and "a1" in rep.split("WITHOUT the model")[1].split("\n")[0] and "a2" not in rep.split("WITHOUT the model")[1].split("\n")[0])
+
 # ── dry run: tokens, not correctness ─────────────────────────────────────────
 rows = [{"outcome": "wrong", "calls": 1, "tokens_prompt": 1500, "tokens_completion": 300}, {"outcome": "correct", "calls": 2, "tokens_prompt": 3000, "tokens_completion": 700},
         {"outcome": "infra_error", "calls": 0, "tokens_prompt": 0, "tokens_completion": 0}]

@@ -37,6 +37,8 @@ RUNS_LOG = os.path.join(HERE, "eval_data", "exp", "RUNS.jsonl")
 RESULTS_DIR = os.path.join(HERE, "eval_results", "exp")
 ARMS = tuple(exp_rules.RULES["arms"])
 ANALYSIS_TEMPERATURE = {"first_attempt": 0.1, "repair": 0.0}   # fixed in analysis_service.py
+SLEEP = time.sleep           # patched in tests
+MAX_PACE_ATTEMPTS = 12       # waits per run before giving up on a run in pace mode
 
 
 # ── the tables the arms analyse ──────────────────────────────────────────────
@@ -155,6 +157,9 @@ def run_one(q: dict, arm: str, repeat: int, case: tuple, solver_name: str, pass_
         result = {"success": False, "resultType": "error", "resultData": None, "error": f"ARM_CRASH: {why}"}
         rec["latency_s"] = 0.0
     else:
+        if solver_name == "llm":
+            import llm_provider as lp
+            lp.clear_last_rate_limit()
         t0, (tok0, calls0) = time.time(), (_snap() if solver_name == "llm" else ({"prompt": 0, "completion": 0}, 0))
         try:
             result = SOLVERS[solver_name](data, q, files.get("customers.csv"), f"exp-{pass_name}-{q['id']}-{arm}-r{repeat}")
@@ -228,38 +233,68 @@ def load_done(path: str) -> dict:
         for line in open(path, encoding="utf-8"):
             if line.strip():
                 r = json.loads(line)
-                done[(r["qid"], r["arm"], r["repeat"])] = r
+                if r["outcome"] != "infra_error":   # an infra error is not a result: its cell must be run again
+                    done[(r["qid"], r["arm"], r["repeat"])] = r
     return done
 
 
-def run_pass(solver_name, pass_name, tier, repeats, max_runs, path, questions, cases, out=print) -> dict:
+def provider_wait(rec: dict) -> float:
+    """Seconds to wait before retrying a run the provider refused: its own retry-after (the quota is a refilling
+    bucket), else a conservative default."""
+    import llm_provider as lp
+    info = lp.last_rate_limit()
+    if info and info.get("retry_after"):
+        return min(float(info["retry_after"]) + 15.0, 3600.0)
+    return 900.0 if "daily ai usage limit" in rec["detail"].lower() else 120.0
+
+
+def run_pass(solver_name, pass_name, tier, repeats, max_runs, path, questions, cases, out=print, pace=False) -> dict:
+    """pace=True: when the provider refuses a run, wait for its quota bucket to refill and retry the SAME run
+    (same question, arm and repeat: nothing is substituted), so one unattended session can span days."""
     done, n, outcomes, stopped = load_done(path), 0, {}, None
     chosen = [q for q in questions if tier in ("all", q["tier"])]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tot = {"calls": 0, "tokens_prompt": 0, "tokens_completion": 0}
-    for rep in range(1, repeats + 1):
-        for q in chosen:
-            for arm in ARMS:
-                if (q["id"], arm, rep) in done:
-                    continue
-                if max_runs and n >= max_runs:
-                    stopped = "max_runs"
-                    break
-                rec = run_one(q, arm, rep, cases[q["case_id"]], solver_name, pass_name)
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(rec) + "\n")
-                n += 1
-                outcomes[rec["outcome"]] = outcomes.get(rec["outcome"], 0) + 1
-                for k in tot:
-                    tot[k] += rec[k]
-                out(f"  {q['id']:<13}{arm:<8}r{rep}  {rec['outcome']}")
-                if rec["outcome"] == "infra_error" and "daily" in rec["detail"].lower():
-                    stopped = "daily_quota"
+    try:
+        for rep in range(1, repeats + 1):
+            for q in chosen:
+                for arm in ARMS:
+                    if (q["id"], arm, rep) in done:
+                        continue
+                    if max_runs and n >= max_runs:
+                        stopped = "max_runs"
+                        break
+                    attempts = 0
+                    while True:
+                        rec = run_one(q, arm, rep, cases[q["case_id"]], solver_name, pass_name)
+                        with open(path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(rec) + "\n")
+                        n += 1
+                        outcomes[rec["outcome"]] = outcomes.get(rec["outcome"], 0) + 1
+                        for k in tot:
+                            tot[k] += rec[k]
+                        out(f"  {q['id']:<13}{arm:<8}r{rep}  {rec['outcome']}")
+                        if rec["outcome"] != "infra_error":
+                            break
+                        if not pace:
+                            if "daily" in rec["detail"].lower():
+                                stopped = "daily_quota"
+                            break
+                        attempts += 1
+                        if attempts > MAX_PACE_ATTEMPTS:
+                            stopped = "gave_up"
+                            break
+                        wait = provider_wait(rec)
+                        out(f"  provider quota: waiting {wait / 60:.1f} min, then retrying this same run (attempt {attempts})")
+                        SLEEP(wait)
+                    if stopped:
+                        break
+                if stopped:
                     break
             if stopped:
                 break
-        if stopped:
-            break
+    except KeyboardInterrupt:
+        stopped = "interrupted"
     return {"runs": n, "outcomes": outcomes, "stopped": stopped, **tot}
 
 
@@ -308,6 +343,7 @@ def main(argv=None, git=cs.git_state) -> int:
     ap.add_argument("--write-prereg", action="store_true")
     ap.add_argument("--force-prereg", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--pace", action="store_true", help="wait out the provider's refilling quota and carry on (one unattended session)")
     ap.add_argument("--tpd", type=int, default=200000, help="the provider's tokens-per-day limit (200000 seen on Groq's free tier)")
     a = ap.parse_args(argv)
     if a.write_prereg:
@@ -334,8 +370,8 @@ def main(argv=None, git=cs.git_state) -> int:
     else:
         print("MECHANICAL solver: no model is called. This is plumbing and question sanity, not evidence about a model.")
     path = os.path.join(RESULTS_DIR, f"{a.pass_name}-{a.solver}.jsonl")
-    summary = run_pass(a.solver, a.pass_name, a.tier, a.repeats, a.max_runs, path, questions, cases)
-    print(f"\n{summary['runs']} runs {summary['outcomes']}" + (f"  STOPPED: {summary['stopped']} (re-run the same command to resume)" if summary["stopped"] else ""))
+    summary = run_pass(a.solver, a.pass_name, a.tier, a.repeats, a.max_runs, path, questions, cases, pace=a.pace)
+    print(f"\n{summary['runs']} runs {summary['outcomes']}" + (f"  STOPPED: {summary['stopped']} (commit the log line, then re-run the same command to resume)" if summary["stopped"] else ""))
     if a.solver == "llm":
         append_log(commit, a.pass_name, a.solver, a.tier, a.repeats, summary)
         print(f"logged to RUNS.jsonl (commit it before the next LLM run); results: {path}")

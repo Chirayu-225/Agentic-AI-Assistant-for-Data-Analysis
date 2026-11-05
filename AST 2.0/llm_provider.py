@@ -73,6 +73,16 @@ def _record_tokens(prompt_tokens, completion_tokens) -> None:
         _tokens["completion"] += int(completion_tokens or 0)
 
 
+def last_rate_limit():
+    """{"retry_after": seconds or None, "daily": bool} for the most recent call this thread gave up on, else None.
+    The provider's quota is a continuously refilling bucket, so retry_after is how long until the request fits."""
+    return getattr(_tls, "last_rate_limit", None)
+
+
+def clear_last_rate_limit() -> None:
+    _tls.last_rate_limit = None
+
+
 def token_stats() -> dict:
     """Snapshot of provider-reported tokens since process start (diff two snapshots to measure one task)."""
     with _token_lock:
@@ -337,6 +347,7 @@ def _call_primary(prompt: str, temperature: float, model: str, max_tokens: int) 
             daily = bool(re.search(r"per day|\(tpd\)|\(rpd\)", str(exc).lower()))
             print(f"[llm] rate limit on {model}, giving up (daily={daily}, retry_after={wait}): "
                   f"{str(exc)[:300]}", flush=True)
+            _tls.last_rate_limit = {"retry_after": wait, "daily": daily}
             raise ProviderRateLimited(_rate_limit_message(daily, wait), daily=daily, retry_after=wait) from exc
 
 

@@ -148,6 +148,9 @@ def report(records: list, questions: list, decide_flag: bool = False) -> str:
     L.append(f"   runs: {len(records)}  " + str(dict(Counter(r['outcome'] for r in records))) + "  (infra errors are excluded from every rate and listed per cell)")
     L += ["", "2. per defect type (cells are correct/n questions; silent = wrong answers with no note; crash = the file could not be read)"]
     L += ["   " + x for x in per_tag_table(questions, maj, infra)]
+    nomodel = sorted({r["qid"] for r in llm if r["calls"] == 0 and r["outcome"] in ("correct", "wrong", "no_answer")})
+    if nomodel:
+        L.append(f"   answered WITHOUT the model (the app's rule-based shortcut) in at least one arm: {', '.join(nomodel)}")
     L += ["", "3. questions the CLEAN arm itself got wrong or could not answer (is the question set or the model the weak link?)"]
     bad = [q for q in questions if (q["id"], "clean") in maj and not maj[(q["id"], "clean")]["correct"]]
     missing = [q for q in questions if (q["id"], "clean") not in maj]

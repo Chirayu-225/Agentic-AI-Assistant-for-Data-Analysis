@@ -152,6 +152,19 @@ check("outages are reported, not hidden", s["infraErrors"] == 3 and s["outcomes"
 s_all = summarize([qr(i, "infra_error") for i in range(3)], 1)
 check("an all-outage run does not crash and scores nothing", s_all["runs"] == 0 and s_all["infraErrors"] == 3)
 
+# ── the harness needs to know how long to wait ───────────────────────────────
+reset()
+lp.clear_last_rate_limit()
+lp._call_groq = lambda *a, **k: (_ for _ in ()).throw(Exception(DAILY_429))
+try:
+    lp._call("p", 0.1, "m")
+except Exception:
+    pass
+info = lp.last_rate_limit()
+check("after giving up, the provider's retry-after and daily flag are available", info == {"retry_after": 862.5, "daily": True}, info)
+lp.clear_last_rate_limit()
+check("it can be cleared, so a stale wait is never reused", lp.last_rate_limit() is None)
+
 # ── token accounting (the quota is in tokens; the call cap counts calls) ──────
 class _Obj:
     def __init__(self, **k): self.__dict__.update(k)
