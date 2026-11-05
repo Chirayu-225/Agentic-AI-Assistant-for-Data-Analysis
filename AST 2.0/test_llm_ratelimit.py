@@ -21,6 +21,8 @@ os.environ.pop("FALLBACK_LLM_API_KEY", None)
 os.environ.pop("FALLBACK_CODE_MODEL", None)
 
 import llm_provider as lp
+
+_REAL_CALL_GROQ = lp._call_groq  # later tests replace lp._call_groq with stubs
 from eval_harness import QuestionResult, classify_failure, summarize
 
 FAIL = []
@@ -149,6 +151,32 @@ check("scored runs exclude outages", s["runs"] == 3, str(s["runs"]))
 check("outages are reported, not hidden", s["infraErrors"] == 3 and s["outcomes"].get("infra_error") == 3, str(s["outcomes"]))
 s_all = summarize([qr(i, "infra_error") for i in range(3)], 1)
 check("an all-outage run does not crash and scores nothing", s_all["runs"] == 0 and s_all["infraErrors"] == 3)
+
+# ── token accounting (the quota is in tokens; the call cap counts calls) ──────
+class _Obj:
+    def __init__(self, **k): self.__dict__.update(k)
+
+class _FakeClient:
+    def __init__(self, usage): self._usage = usage
+    @property
+    def chat(self): return self
+    @property
+    def completions(self): return self
+    def create(self, **kw):
+        return _Obj(choices=[_Obj(message=_Obj(content="answer"), finish_reason="stop")], usage=self._usage)
+
+lp._client = _FakeClient(_Obj(prompt_tokens=700, completion_tokens=120))
+before = lp.token_stats()
+out = _REAL_CALL_GROQ("p", 0.1, "some-model", 100)
+after = lp.token_stats()
+check("the provider's reported tokens are accumulated per call",
+      out == "answer" and after["calls"] - before["calls"] == 1 and after["prompt"] - before["prompt"] == 700 and after["completion"] - before["completion"] == 120, after)
+lp._client = _FakeClient(None)
+b2 = lp.token_stats()
+_REAL_CALL_GROQ("p", 0.1, "some-model", 100)
+a2 = lp.token_stats()
+check("a response without usage is counted as unreported, not as zero tokens", a2["unreported"] - b2["unreported"] == 1 and a2["calls"] == b2["calls"], a2)
+lp._client = None
 
 print()
 if FAIL:

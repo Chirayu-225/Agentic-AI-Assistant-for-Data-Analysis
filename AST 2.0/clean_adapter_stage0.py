@@ -24,18 +24,47 @@ PANDAS_NA = {"", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan
              "N/A", "NA", "NULL", "NaN", "None", "n/a", "nan", "null"}
 
 
-def run(case_id: str, data: bytes, companions: dict) -> dict:
+def clean_table(data: bytes) -> dict:
+    """The Stage 0 table for `data`: read -> raw-string frame -> rule_based_clean -> identifier columns restored.
+    Returns {"res": reader result, "names", "rows", "out": cleaned DataFrame or None, "lines": source line of every
+    cleaned row, "log", "error": "" or why there is no table}. Shared by the scorer adapter and the experiment."""
     import numpy as np
     import pandas as pd
 
     res = read(data)
+    out = {"res": res, "names": [c["name"] for c in res["columns"]], "rows": res["rows"], "out": None, "lines": [],
+           "log": [], "error": ""}
+    if res["status"] != "ok":
+        out["error"] = f"unreadable: {res['reason']}"
+        return out
+    rows, names = res["rows"], out["names"]
+    if not rows:
+        return out
+    df = pd.DataFrame([[np.nan if v in PANDAS_NA else v for v in f] for _, f in rows], columns=names, dtype=object)
+    try:
+        cleaned, lines, log = clean_with_provenance(df, [ln for ln, _ in rows])
+    except Exception as e:  # noqa: BLE001
+        out["error"] = f"cleaner failed: {type(e).__name__}: {e}"
+        return out
+    by_line = dict(rows)
+    for name in res["hints"]["identifier_columns"]:
+        key, j = norm_col(name), names.index(name)
+        if key in cleaned.columns:
+            cleaned[key] = pd.Series([by_line[ln][j].strip() if by_line[ln][j].strip().isdigit() else v
+                                      for ln, v in zip(lines, cleaned[key])], index=cleaned.index, dtype=object)
+    out.update(out=cleaned, lines=lines, log=log)
+    return out
+
+
+def run(case_id: str, data: bytes, companions: dict) -> dict:
+    t = clean_table(data)
+    res, names, rows = t["res"], t["names"], t["rows"]
     gate = {"asked": bool(res["asks"]), "kinds": [a["kind"] for a in res["asks"]], "asks": res["asks"],
             "header": res["structure"].get("header", {})}
-    if res["status"] != "ok":
-        d = failure(case_id, f"unreadable: {res['reason']}", CAPABILITIES)
+    if t["error"]:
+        d = failure(case_id, t["error"], CAPABILITIES)
         d["gate"] = gate
         return d
-    rows, names = res["rows"], [c["name"] for c in res["columns"]]
     st = res["structure"]
     structure = {"header_line": st.get("header_line"), "columns": list(names)}
     raw = {"header_line": st.get("header_line"), "header": list(st.get("header_fields", []))[: len(names)] or names,
@@ -43,26 +72,23 @@ def run(case_id: str, data: bytes, companions: dict) -> dict:
     preds = [_pred(ln, None, None, "ignore", reason="blank line skipped by the reader") for ln in res["blanks"]]
     preds += [_pred(x["line"], None, None, "quarantine", reason=x["reason"]) for x in res["excluded"]]
     preds += [_pred(x["line"], None, None, "flag", reason=x["reason"]) for x in res["flags"] if x["reason"] == "possible_shift"]
-    if not rows:
+    if t["out"] is None:
         return {"case_id": case_id, "status": "ok", "error": "", "capabilities": sorted(CAPABILITIES), "structure": structure,
                 "predictions": preds, "gate": gate}
-
-    df = pd.DataFrame([[np.nan if v in PANDAS_NA else v for v in f] for _, f in rows], columns=names, dtype=object)
-    try:
-        out, lines, log = clean_with_provenance(df, [ln for ln, _ in rows])
-    except Exception as e:  # noqa: BLE001
-        d = failure(case_id, f"cleaner failed: {type(e).__name__}: {e}", CAPABILITIES)
-        d["gate"] = gate
-        return d
-    by_line = dict(rows)
-    for name in res["hints"]["identifier_columns"]:
-        key, j = norm_col(name), names.index(name)
-        if key in out.columns:
-            out[key] = pd.Series([by_line[ln][j].strip() if by_line[ln][j].strip().isdigit() else v
-                                  for ln, v in zip(lines, out[key])], index=out.index, dtype=object)
+    out = t["out"]
     text_rows = [[cell_text(v) for v in r] for r in out.itertuples(index=False, name=None)]
-    doc = build_predictions(case_id, raw, names, [str(c) for c in out.columns], text_rows, lines, log, CAPABILITIES)
+    doc = build_predictions(case_id, raw, names, [str(c) for c in out.columns], text_rows, t["lines"], t["log"], CAPABILITIES)
     doc["predictions"] += preds
     doc["structure"] = structure
     doc["gate"] = gate
     return doc
+
+
+def cleaned_csv_bytes(data: bytes):
+    """-> (csv bytes of the Stage 0 table, "") or (None, why). Used by the experiment's third arm."""
+    t = clean_table(data)
+    if t["error"]:
+        return None, t["error"]
+    if t["out"] is None:
+        return None, "the file has a header but no data rows"
+    return t["out"].to_csv(index=False).encode("utf-8"), ""

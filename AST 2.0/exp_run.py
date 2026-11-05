@@ -1,0 +1,348 @@
+"""
+exp_run.py — runs the arms of the experiment (see exp_rules.py for the pre-registration).
+
+    python exp_run.py --write-prereg                       # once: fixes the question set, data hash, model, rules
+    python exp_run.py --dry-run                            # 5 runs on the real model: prints tokens per call, NOT correctness
+    python exp_run.py --solver mechanical --pass check     # no model, no quota: plumbing and question sanity
+    python exp_run.py --solver llm --pass shakedown1       # the one-day, 1-repeat shakedown (single tier)
+    python exp_run.py --solver llm --pass full --tier all --repeats 3 --max-runs 150    # resumable across days
+
+An LLM run refuses to start unless: the working tree is clean (so every run maps to a commit), PREREG.json exists
+and matches the regenerated question set and data, and the model matches the pinned one. Every run is appended to
+the committed RUNS.jsonl, and the run count is printed before anything else.
+
+The "mechanical" solver is NOT an LLM. It applies the obvious pandas operation to whatever table an arm produces
+(no cleverness, no compensation), through the same bytes-in path. It is for testing the harness and checking that
+each question can actually be broken by its defect; it says nothing about what a model does.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+import time
+import tracemalloc
+
+import clean_score as cs
+import exp_questions as eq
+import exp_rules
+from eval_harness import Question, check_answer, classify_failure
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PREREG = os.path.join(HERE, "eval_data", "exp", "PREREG.json")
+RUNS_LOG = os.path.join(HERE, "eval_data", "exp", "RUNS.jsonl")
+RESULTS_DIR = os.path.join(HERE, "eval_results", "exp")
+ARMS = tuple(exp_rules.RULES["arms"])
+ANALYSIS_TEMPERATURE = {"first_attempt": 0.1, "repair": 0.0}   # fixed in analysis_service.py
+
+
+# ── the tables the arms analyse ──────────────────────────────────────────────
+def prepare(arm: str, files: dict, doc: dict):
+    """-> (bytes or None, why-not, seconds, peak MB) for the table this arm analyses."""
+    tracemalloc.start()
+    t0 = time.time()
+    err = ""
+    if arm == "clean":
+        data = eq.attainable_csv(files, doc)  # the ceiling: what a perfect cleaner could deliver from the dirty file
+    elif arm == "dirty":
+        data = files["data.csv"]
+    else:
+        from clean_adapter_stage0 import cleaned_csv_bytes
+        data, err = cleaned_csv_bytes(files["data.csv"])
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    return data, err, round(time.time() - t0, 3), round(peak / 1e6, 1)
+
+
+# ── solvers ──────────────────────────────────────────────────────────────────
+def llm_solver(data: bytes, q: dict, customers, session: str) -> dict:
+    if q["join"]:
+        from multi_table_service import run_multi_table_query
+        return run_multi_table_query([{"alias": "orders", "csv_bytes": data, "filename": "orders.csv"},
+                                      {"alias": "customers", "csv_bytes": customers, "filename": "customers.csv"}],
+                                     q["question"], session)
+    from analysis_service import run_analysis
+    return run_analysis(data, "data.csv", q["question"], session)
+
+
+def mechanical_solver(data: bytes, q: dict, customers, session: str) -> dict:
+    import pandas as pd
+
+    import cleaning
+    import file_reader
+
+    def load(b):
+        df = file_reader._read_tabular_file_uncached(b, "data.csv")
+        return cleaning.rule_based_clean(df)[0]
+
+    err = lambda m: {"success": False, "resultType": "error", "resultData": None, "error": m}
+    try:
+        df = load(data)
+    except Exception as e:  # noqa: BLE001
+        return err(f"Could not parse file: {e}")
+    op, col, num = q["op"], q["op"].get("col"), lambda c: pd.to_numeric(df[c], errors="coerce")
+    try:
+        o = op["op"]
+        if o == "count_rows":
+            v = len(df)
+        elif o == "count_distinct":
+            v = df[col].nunique()
+        elif o == "sum":
+            v = num(col).sum()
+        elif o == "avg":
+            v = num(col).mean()
+        elif o == "max":
+            v = num(col).max()
+        elif o == "count_value":
+            v = (df[col] == op["value"]).sum()
+        elif o == "share_value":
+            v = (df[col] == op["value"]).mean() * 100
+        elif o == "count_year":
+            v = (pd.to_datetime(df[col], errors="coerce").dt.year == op["year"]).sum()
+        elif o == "max_year":
+            v = pd.to_datetime(df[col], errors="coerce").dt.year.max()
+        elif o == "avg_pct":
+            v = num(col).mean() * 100
+        elif o == "avg_tenure_years":
+            v = (pd.to_datetime(df["end_date"], errors="coerce") - pd.to_datetime(df["start_date"], errors="coerce")).dt.days.mean() / 365.25
+        elif o in ("join_count_tier", "join_sum_tier"):
+            cust = load(customers)
+            m = df.merge(cust[["customer_id", "tier"]], on="customer_id", how="inner")
+            m = m[m["tier"] == op["value"]]
+            v = len(m) if o == "join_count_tier" else pd.to_numeric(m["amount"], errors="coerce").sum()
+        else:
+            return err(f"no mechanical rule for {o}")
+        return {"success": True, "resultType": "scalar", "resultData": float(v), "error": None}
+    except Exception as e:  # noqa: BLE001
+        return err(f"mechanical solver failed: {type(e).__name__}: {e}")
+
+
+SOLVERS = {"llm": llm_solver, "mechanical": mechanical_solver}
+
+
+# ── one run ──────────────────────────────────────────────────────────────────
+def classify(q: dict, result: dict):
+    """-> (outcome, actual). Outcomes: correct | wrong | no_answer | error | crash | infra_error."""
+    err = str(result.get("error") or "")
+    if classify_failure(err) == "infra_error":
+        return "infra_error", ""
+    if err.startswith(("ARM_CRASH", "Could not parse file")):
+        return "crash", ""
+    if not result.get("success", result.get("resultType") != "error"):
+        return "error", ""
+    verdict = check_answer(Question(id=q["id"], question=q["question"], expected=q["expected"], answer_type=q["answer_type"],
+                                    tolerance=q["tolerance"]), result)
+    if not verdict.comparable:
+        return "no_answer", verdict.actual
+    return ("correct" if verdict.correct else "wrong"), verdict.actual
+
+
+def _snap():
+    import llm_provider as lp
+    return dict(lp.token_stats()), lp.usage_stats().get("calls", 0)
+
+
+def run_one(q: dict, arm: str, repeat: int, case: tuple, solver_name: str, pass_name: str) -> dict:
+    _, files, doc = case
+    data, why, prep_s, prep_mb = prepare(arm, files, doc)
+    rec = {"ts": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(), "pass": pass_name, "qid": q["id"],
+           "tag": q["tag"], "tier": q["tier"], "kind": q["kind"], "arm": arm, "repeat": repeat, "expected": q["expected"],
+           "solver": solver_name, "prep_s": prep_s, "prep_peak_mb": prep_mb, "calls": 0, "tokens_prompt": 0, "tokens_completion": 0}
+    if data is None:
+        result = {"success": False, "resultType": "error", "resultData": None, "error": f"ARM_CRASH: {why}"}
+        rec["latency_s"] = 0.0
+    else:
+        t0, (tok0, calls0) = time.time(), (_snap() if solver_name == "llm" else ({"prompt": 0, "completion": 0}, 0))
+        try:
+            result = SOLVERS[solver_name](data, q, files.get("customers.csv"), f"exp-{pass_name}-{q['id']}-{arm}-r{repeat}")
+        except Exception as e:  # noqa: BLE001 — a solver crash is a result
+            result = {"success": False, "resultType": "error", "resultData": None, "error": f"{type(e).__name__}: {e}"}
+        rec["latency_s"] = round(time.time() - t0, 2)
+        if solver_name == "llm":
+            tok1, calls1 = _snap()
+            rec.update(calls=calls1 - calls0, tokens_prompt=tok1["prompt"] - tok0["prompt"], tokens_completion=tok1["completion"] - tok0["completion"])
+    rec["outcome"], rec["actual"] = classify(q, result)
+    rec["note"] = bool(result.get("notes") or result.get("cleaningNotes"))
+    rec["detail"] = str(result.get("error") or "")[:160] if rec["outcome"] not in ("correct", "wrong") else ""
+    return rec
+
+
+# ── guards, pre-registration, log ────────────────────────────────────────────
+def model_pin() -> dict:
+    import llm_provider as lp
+    return {"code_model": lp._CODE_MODEL, "chat_model": lp._CHAT_MODEL, "analysis_temperature": ANALYSIS_TEMPERATURE}
+
+
+def prereg_doc(questions: list) -> dict:
+    tiers = {t: sum(1 for q in questions if q["tier"] == t) for t in ("single", "compound")}
+    return {"written_utc": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(),
+            "questions_sha256": eq.questions_sha256(questions), "data_sha256": eq.data_sha256(), "n_questions": tiers,
+            "model": model_pin(), "rules": exp_rules.RULES,
+            "note": "Committed before any LLM run. The shakedown is not a verdict (see exp_rules.py)."}
+
+
+def write_prereg(force: bool = False) -> int:
+    _, questions = eq.build_exp()
+    doc = prereg_doc(questions)
+    if os.path.exists(PREREG) and not force:
+        old = json.load(open(PREREG, encoding="utf-8"))
+        same = all(old.get(k) == doc[k] for k in ("questions_sha256", "data_sha256", "model", "rules"))
+        print("PREREG.json already exists and " + ("matches the current question set, data, model and rules." if same else
+              "DIFFERS from the current question set / data / model / rules. Refusing to overwrite a pre-registration."))
+        return 0 if same else 2
+    os.makedirs(os.path.dirname(PREREG), exist_ok=True)
+    json.dump(doc, open(PREREG, "w", encoding="utf-8"), indent=1)
+    print(f"wrote {PREREG}\n  questions: {doc['n_questions']}  questions_sha256 {doc['questions_sha256'][:16]}  data_sha256 {doc['data_sha256'][:16]}\n"
+          f"  model {doc['model']['code_model']}  analysis temperature {doc['model']['analysis_temperature']}\n"
+          "  Commit PREREG.json, exp_rules.py and the code before the first LLM run.")
+    return 0
+
+
+def guard_llm(questions: list, git=cs.git_state):
+    commit, dirty = git()
+    if commit is None or dirty is None:
+        return False, ["REFUSED: cannot read git state, so this run could not be tied to a commit."], None
+    if dirty:
+        return False, [f"REFUSED: the working tree has {dirty} uncommitted change(s). Commit first (a previous run's RUNS.jsonl line counts)."], commit
+    if not os.path.exists(PREREG):
+        return False, ["REFUSED: PREREG.json does not exist. Run --write-prereg, then commit."], commit
+    pre = json.load(open(PREREG, encoding="utf-8"))
+    if pre["questions_sha256"] != eq.questions_sha256(questions):
+        return False, ["REFUSED: the question set no longer matches PREREG.json."], commit
+    if pre["data_sha256"] != eq.data_sha256():
+        return False, ["REFUSED: the generated tables no longer match PREREG.json."], commit
+    if pre["model"] != model_pin():
+        return False, [f"REFUSED: the model or temperature differs from the pinned one ({pre['model']} vs {model_pin()})."], commit
+    runs = cs.read_log(RUNS_LOG)
+    last = runs[-1] if runs else None
+    return True, [f"EXPERIMENT RUN #{len(runs) + 1}  |  last run: {last['ts'] + ' @ ' + last['commit'][:8] + ' (' + last['pass'] + ')' if last else 'never'}  |  "
+                  f"model {pre['model']['code_model']}"], commit
+
+
+def load_done(path: str) -> dict:
+    done = {}
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            if line.strip():
+                r = json.loads(line)
+                done[(r["qid"], r["arm"], r["repeat"])] = r
+    return done
+
+
+def run_pass(solver_name, pass_name, tier, repeats, max_runs, path, questions, cases, out=print) -> dict:
+    done, n, outcomes, stopped = load_done(path), 0, {}, None
+    chosen = [q for q in questions if tier in ("all", q["tier"])]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tot = {"calls": 0, "tokens_prompt": 0, "tokens_completion": 0}
+    for rep in range(1, repeats + 1):
+        for q in chosen:
+            for arm in ARMS:
+                if (q["id"], arm, rep) in done:
+                    continue
+                if max_runs and n >= max_runs:
+                    stopped = "max_runs"
+                    break
+                rec = run_one(q, arm, rep, cases[q["case_id"]], solver_name, pass_name)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec) + "\n")
+                n += 1
+                outcomes[rec["outcome"]] = outcomes.get(rec["outcome"], 0) + 1
+                for k in tot:
+                    tot[k] += rec[k]
+                out(f"  {q['id']:<13}{arm:<8}r{rep}  {rec['outcome']}")
+                if rec["outcome"] == "infra_error" and "daily" in rec["detail"].lower():
+                    stopped = "daily_quota"
+                    break
+            if stopped:
+                break
+        if stopped:
+            break
+    return {"runs": n, "outcomes": outcomes, "stopped": stopped, **tot}
+
+
+def append_log(commit, pass_name, solver_name, tier, repeats, summary):
+    rec = {"ts": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(), "commit": commit, "pass": pass_name,
+           "solver": solver_name, "tier": tier, "repeats": repeats, "model": model_pin(), **summary}
+    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
+    with open(RUNS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+# ── dry run: tokens per call, never correctness ──────────────────────────────
+def dry_run(questions, cases, tpd: int, out=print) -> dict:
+    picks = [("footer-1", "dirty"), ("datemix-1", "dirty"), ("sentinel-1", "stage0"), ("outlier-1", "dirty"), ("catvar-1", "clean")]
+    qmap = {q["id"]: q for q in questions}
+    rows = []
+    for qid, arm in picks:
+        q = qmap[qid]
+        rec = run_one(q, arm, 1, cases[q["case_id"]], "llm", "dryrun")
+        rows.append(rec)
+        out(f"  {qid:<12}{arm:<8} calls {rec['calls']}  tokens in/out {rec['tokens_prompt']}/{rec['tokens_completion']}  {rec['latency_s']}s"
+            + ("" if rec["outcome"] != "infra_error" else "  [infra error: provider]"))
+    return dry_summary(rows, tpd)
+
+
+def dry_summary(rows: list, tpd: int) -> dict:
+    ok = [r for r in rows if r["outcome"] != "infra_error" and r["calls"] > 0]
+    calls = sum(r["calls"] for r in ok)
+    tokens = sum(r["tokens_prompt"] + r["tokens_completion"] for r in ok)
+    if not ok or not calls or not tokens:
+        return {"usable": False}
+    per_call, calls_per_run = tokens / calls, calls / len(ok)
+    return {"usable": True, "runs": len(ok), "calls": calls, "tokens_per_call": round(per_call), "calls_per_run": round(calls_per_run, 2),
+            "tokens_per_run": round(tokens / len(ok)), "runs_per_day": int(0.9 * tpd / (tokens / len(ok))),
+            "recommended_daily_call_limit": int(0.9 * tpd / per_call),
+            "shakedown_runs": 40 * 3, "shakedown_tokens": round(40 * 3 * tokens / len(ok))}
+
+
+def main(argv=None, git=cs.git_state) -> int:
+    ap = argparse.ArgumentParser(description="Experiment arms harness")
+    ap.add_argument("--solver", choices=sorted(SOLVERS), default="mechanical")
+    ap.add_argument("--pass", dest="pass_name", default="check")
+    ap.add_argument("--tier", choices=["single", "compound", "all"], default="single")
+    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--max-runs", type=int, default=0)
+    ap.add_argument("--write-prereg", action="store_true")
+    ap.add_argument("--force-prereg", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--tpd", type=int, default=200000, help="the provider's tokens-per-day limit (200000 seen on Groq's free tier)")
+    a = ap.parse_args(argv)
+    if a.write_prereg:
+        return write_prereg(a.force_prereg)
+    cases, questions = eq.build_exp()
+    if a.dry_run:
+        print("DRY RUN: 5 real model runs. Prints tokens and latency only; correctness is neither shown nor stored.")
+        s = dry_run(questions, cases, a.tpd)
+        if not s["usable"]:
+            print("No usable runs (provider error or no token usage reported). Check GROQ_API_KEY and the quota.")
+            return 1
+        print(f"\ntokens per call: {s['tokens_per_call']}   calls per run: {s['calls_per_run']}   tokens per run: {s['tokens_per_run']}"
+              f"\nat {a.tpd:,} tokens/day: about {s['runs_per_day']} runs/day (90% of the quota)"
+              f"\nrecommended LLM_DAILY_CALL_LIMIT: {s['recommended_daily_call_limit']}  (the default 400 assumes ~500 tokens per call)"
+              f"\nshakedown (40 questions x 3 arms x 1 repeat = {s['shakedown_runs']} runs): about {s['shakedown_tokens']:,} tokens "
+              f"= {s['shakedown_tokens'] / a.tpd:.0%} of one day")
+        return 0
+    commit = None
+    if a.solver == "llm":
+        ok, lines, commit = guard_llm(questions, git)
+        print("\n".join(lines))
+        if not ok:
+            return 2
+    else:
+        print("MECHANICAL solver: no model is called. This is plumbing and question sanity, not evidence about a model.")
+    path = os.path.join(RESULTS_DIR, f"{a.pass_name}-{a.solver}.jsonl")
+    summary = run_pass(a.solver, a.pass_name, a.tier, a.repeats, a.max_runs, path, questions, cases)
+    print(f"\n{summary['runs']} runs {summary['outcomes']}" + (f"  STOPPED: {summary['stopped']} (re-run the same command to resume)" if summary["stopped"] else ""))
+    if a.solver == "llm":
+        append_log(commit, a.pass_name, a.solver, a.tier, a.repeats, summary)
+        print(f"logged to RUNS.jsonl (commit it before the next LLM run); results: {path}")
+    else:
+        print(f"results: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

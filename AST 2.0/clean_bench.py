@@ -313,7 +313,7 @@ def pick_date(rng: Rng, lo: dt.date, hi: dt.date, day_max: Optional[int] = None)
     return d
 
 
-def gen_rows(family: str, rng: Rng, n: int, ambig: bool, vocab: dict):
+def gen_rows(family: str, rng: Rng, n: int, ambig: bool, vocab: dict, companion_tier: bool = False):
     """Clean typed rows (list of dict) and an optional companion table."""
     dm = 12 if ambig else None
     rows, companion = [], None
@@ -328,6 +328,10 @@ def gen_rows(family: str, rng: Rng, n: int, ambig: bool, vocab: dict):
             custs.append((f"{cid:06d}", f"{rng.pick(FIRST)} {rng.pick(LAST)}", rng.pick(REGIONS)))
         companion = {"name": "customers.csv", "header": ["customer_id", "customer", "region"],
                      "rows": [list(c) for c in custs], "ids": {c[0] for c in custs}}
+        if companion_tier:  # only the customers file knows the tier, so a question about it needs the join
+            companion["header"].append("tier")
+            for row in companion["rows"]:
+                row.append(rng.weighted([("Gold", 25), ("Silver", 35), ("Bronze", 40)]))
         for i in range(1, n + 1):
             cid, cname, region = rng.pick(custs)
             if ambig:
@@ -398,7 +402,8 @@ class CaseSpec:
 
     @property
     def case_id(self) -> str:
-        return f"{self.split}-{self.family}-{self.n_rows}-{self.locale}" + ("-ctrl" if self.rate == 0 else "")
+        tag = self.flags.get("tag")
+        return f"{self.split}-{self.family}-{self.n_rows}-{self.locale}" + ("-ctrl" if self.rate == 0 else "") + (f"-{tag}" if tag else "")
 
 
 FOOT = ["Source: ERP export v4.2", "Confidential - internal use only", "Rows may be revised after month-end close"]
@@ -416,7 +421,8 @@ class Ctx:
         self.ambig = spec.flags.get("ambig")  # "dayfirst" | "monthfirst" | None
         loc_fmt, self.money_style = LOCALES[spec.locale]
         self.date_fmt = {"dayfirst": "%d/%m/%Y", "monthfirst": "%m/%d/%Y"}.get(self.ambig, loc_fmt)
-        clean, self.companion = gen_rows(spec.family, self.rng, spec.n_rows, bool(self.ambig), self.vocab)
+        clean, self.companion = gen_rows(spec.family, self.rng, spec.n_rows, bool(self.ambig), self.vocab,
+                                         bool(spec.flags.get("companion_tier")))
         self.rows = [R("data", [], c) for c in clean]
         for r in self.rows:
             r.shown = self.render_row(r.clean)
@@ -467,8 +473,9 @@ class Ctx:
         return self._vals[name]
 
     # picking
-    def cols_idx(self, kinds, allow_optional: bool = True) -> list:
-        return [i for i, c in enumerate(self.cols) if c.kind in kinds and (allow_optional or not c.optional)]
+    def cols_idx(self, kinds, allow_optional: bool = True, restrict: bool = True) -> list:
+        only = self.spec.flags.get("cols") if restrict else None  # experiment cases may confine injectors to named columns
+        return [i for i, c in enumerate(self.cols) if c.kind in kinds and (allow_optional or not c.optional) and (not only or c.name in only)]
 
     def take(self, pred: Optional[Callable] = None) -> Optional[R]:
         f = self.free
@@ -816,13 +823,16 @@ def run_defects(c: Ctx) -> None:
     if c.spec.rate <= 0:
         return
     app = applicable_defects(c)
+    only = c.spec.flags.get("only")  # experiment cases: exactly these defect types (an empty list means none)
+    if only is not None:
+        app = [d for d in app if d.name in only]
     if not app:
         return
     n = c.spec.n_rows
-    k = len(app) if n >= 1000 else min(len(app), max(4, n // 25))
+    k = len(app) if (n >= 1000 or only is not None) else min(len(app), max(4, n // 25))
     start = (c.spec.index * 7) % len(app)
     chosen = (app[start:] + app[:start])[:k]
-    per = max(1, round(c.spec.rate * n / k))
+    per = c.spec.flags.get("per") or max(1, round(c.spec.rate * n / k))
     per = min(per, max(1, int(0.4 * len(c.free) / k)))
     for d in chosen:
         for _ in range(per):
@@ -886,16 +896,16 @@ def place_decoys(c: Ctx) -> None:
 def column_conditions(c: Ctx) -> None:
     spec = c.spec
     if c.money_style != "plain":
-        for ci in c.cols_idx(("money",)):
+        for ci in c.cols_idx(("money",), restrict=False):
             c.add_col_label("number_formatted_text", ci, "fix", ["fix"], extra={"locale": spec.locale, "style": c.money_style})
-    for ci in c.cols_idx(("date",)):
+    for ci in c.cols_idx(("date",), restrict=False):
         if c.ambig:
             c.add_col_label("date_ambiguous", ci, "ask", ["ask"],
                             extra={"truth": c.ambig, "candidates": ["dayfirst", "monthfirst"]})
         elif c.date_fmt != "%Y-%m-%d":
             c.add_col_label("date_locale_format", ci, "fix", ["fix"], extra={"format": c.date_fmt})
     if spec.flags.get("bool_mixed"):
-        bis = c.cols_idx(("bool",))
+        bis = c.cols_idx(("bool",), restrict=False)
         if bis:
             ci = bis[0]
             name = c.cols[ci].name
@@ -995,7 +1005,7 @@ def build_case(spec: CaseSpec):
         if r.kind == "data":
             tw.writerow([r.line] + [c.canon(col, r.clean[col.name]) or "" for col in c.cols])
 
-    for ci in c.cols_idx(("date", "money", "text", "id", "int", "cat", "bool", "pct", "idnum", "unit"), True):
+    for ci in c.cols_idx(("date", "money", "text", "id", "int", "cat", "bool", "pct", "idnum", "unit"), True, restrict=False):
         col = c.cols[ci]
         if col.optional:
             k = sum(1 for r in c.rows if r.kind == "data" and r.clean[col.name] is None)
@@ -1067,6 +1077,38 @@ PROFILES = {
                    _T("orders", 6000, "plain", 0.08), _T("inventory", 2500, "plain", 0.06, B_BOM),
                    _T("staff", 400, "plain", 0.06, B0, {"ambig": "dayfirst"}), _T("orders", 400, "plain", 0.06, B0, {"ambig": "monthfirst"}),
                    _T("orders", 1500, "plain", 0), _T("staff", 1500, "plain", 0), _T("inventory", 1500, "plain", 0)],
+    },
+    # Experiment tables (does cleaning change analysis answers?): dev vocabulary only, fresh seeds via the tag.
+    # Single tier: ONE defect type per table, so a wrong answer has one cause. Compound tier: 2-3 defects stacked.
+    "exp": {
+        "dev": [
+            _T("orders", 600, "plain", 0.01, {"footer": 3}, {"tag": "footer", "only": []}),
+            _T("orders", 600, "plain", 0.01, {"total_row": True}, {"tag": "total", "only": []}),
+            _T("staff", 600, "plain", 0.01, {"header_line": 4}, {"tag": "header", "only": []}),
+            _T("inventory", 600, "plain", 0.01, {"ragged_rate": 0.01}, {"tag": "ragged", "only": []}),
+            _T("staff", 600, "plain", 0.01, {"bom": True, "trailing_delim": True}, {"tag": "bomtrail", "only": []}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "dupexact", "only": ["dup_exact"], "per": 30}),
+            _T("staff", 600, "plain", 0.01, B0, {"tag": "dupnear", "only": ["dup_near"], "per": 30}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "sentinel", "only": ["sentinel_null"], "cols": ["amount"], "per": 30}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "numtext", "only": ["number_as_text"], "cols": ["amount"], "per": 30}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "outlier", "only": ["outlier_magnitude"], "per": 6}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "impossible", "only": ["impossible_value"], "per": 6}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "future", "only": ["future_date"], "cols": ["order_date"], "per": 12}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "datemix", "only": ["date_mixed_format"], "cols": ["order_date"], "per": 30}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "catvar", "only": ["category_variant"], "cols": ["category"], "per": 40}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "whitespace", "only": ["whitespace"], "cols": ["status"], "per": 40}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "swap", "only": ["swapped_values"], "per": 12}),
+            _T("inventory", 600, "plain", 0.01, B0, {"tag": "unit", "only": ["unit_mismatch"], "cols": ["weight"], "per": 30}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "pct", "only": ["percent_scale"], "cols": ["discount"], "per": 20}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "zeros", "only": ["lost_leading_zero"], "cols": ["customer_id"], "per": 40}),
+            _T("staff", 600, "plain", 0.01, B0, {"tag": "endstart", "only": ["end_before_start"], "per": 12}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "orphan", "only": ["orphan_fk"], "per": 12, "companion_tier": True}),
+            _T("orders", 600, "plain", 0.01, {"total_row": True}, {"tag": "c1", "only": ["sentinel_null", "whitespace", "category_variant"], "cols": ["amount", "category", "status"], "per": 20}),
+            _T("orders", 600, "plain", 0.01, {"total_row": True}, {"tag": "c2", "only": ["number_as_text", "outlier_magnitude", "dup_exact"], "cols": ["amount"], "per": 20}),
+            _T("orders", 600, "plain", 0.01, B0, {"tag": "c3", "only": ["future_date", "date_mixed_format", "impossible_value"], "cols": ["order_date"], "per": 15}),
+            _T("staff", 600, "plain", 0.01, B0, {"tag": "c4", "only": ["end_before_start", "sentinel_null", "dup_near"], "cols": ["salary"], "per": 20}),
+            _T("inventory", 600, "plain", 0.01, {"footer": 2}, {"tag": "c5", "only": ["unit_mismatch", "whitespace", "dup_exact"], "cols": ["weight", "item"], "per": 20}),
+        ],
     },
     "mini": {
         "dev": [_T("orders", 120, "us", 0.10, B_ALL, BM), _T("staff", 100, "india", 0.10, B_HF, {"ambig": "dayfirst"}),

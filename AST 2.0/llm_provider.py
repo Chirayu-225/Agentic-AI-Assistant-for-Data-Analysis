@@ -57,6 +57,27 @@ _client = None
 # lines, and caching it made "try again" return the same broken answer.
 _tls = threading.local()
 
+# Provider-reported token use for every successful model call in this process. The daily cap counts CALLS,
+# but the provider's quota is in TOKENS, so capacity can only be planned from measured tokens per call.
+_token_lock = threading.Lock()
+_tokens = {"calls": 0, "prompt": 0, "completion": 0, "unreported": 0}
+
+
+def _record_tokens(prompt_tokens, completion_tokens) -> None:
+    with _token_lock:
+        if prompt_tokens is None and completion_tokens is None:
+            _tokens["unreported"] += 1
+            return
+        _tokens["calls"] += 1
+        _tokens["prompt"] += int(prompt_tokens or 0)
+        _tokens["completion"] += int(completion_tokens or 0)
+
+
+def token_stats() -> dict:
+    """Snapshot of provider-reported tokens since process start (diff two snapshots to measure one task)."""
+    with _token_lock:
+        return dict(_tokens)
+
 
 def last_call_truncated() -> bool:
     return bool(getattr(_tls, "truncated", False))
@@ -96,6 +117,8 @@ def _call_groq(prompt: str, temperature: float, model: str, max_tokens: int) -> 
     )
     choice = resp.choices[0]
     text = choice.message.content or ""
+    usage = getattr(resp, "usage", None)
+    _record_tokens(getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None))
     _tls.truncated = choice.finish_reason == "length"
     if _tls.truncated:
         print(f"[llm] answer from {model} hit max_tokens={max_tokens} and was cut off", flush=True)
@@ -128,7 +151,10 @@ def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) 
         timeout=90,
     )
     resp.raise_for_status()
-    choice = resp.json()["choices"][0]
+    body = resp.json()
+    usage = body.get("usage") or {}
+    _record_tokens(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+    choice = body["choices"][0]
     _tls.truncated = choice.get("finish_reason") == "length"
     text = (choice["message"].get("content") or "")
     if not text.strip():

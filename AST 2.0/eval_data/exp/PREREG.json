@@ -1,0 +1,68 @@
+{
+ "written_utc": "2026-11-05T10:56:11",
+ "questions_sha256": "c3b1453872d35ed75a60cf02549993c8aa0352c9af8710341d2408bfd94dd996",
+ "data_sha256": "968849e7ae12640198bc1354a841a2db58ddf397f523c01189a19cf78f774d14",
+ "n_questions": {
+  "single": 40,
+  "compound": 10
+ },
+ "model": {
+  "code_model": "openai/gpt-oss-20b",
+  "chat_model": "openai/gpt-oss-120b",
+  "analysis_temperature": {
+   "first_attempt": 0.1,
+   "repair": 0.0
+  }
+ },
+ "rules": {
+  "version": 1,
+  "arms": [
+   "clean",
+   "dirty",
+   "stage0"
+  ],
+  "structural_tags": [
+   "footer",
+   "total",
+   "header",
+   "ragged",
+   "bomtrail"
+  ],
+  "headroom": {
+   "min_points": 10.0,
+   "ci": 0.95,
+   "bootstrap": 5000,
+   "seed": 20261105,
+   "condition": "clean-arm majority answer correct",
+   "pooled_over": "value-level single-tier questions"
+  },
+  "stage0_wiring": {
+   "structural": "matches or beats dirty on every defect type",
+   "new_crashes": 0,
+   "non_structural_net_worse_max": 1
+  },
+  "gap_closed_min_clean_minus_dirty": 20.0,
+  "majority": "strictly more than half of non-infra repeats correct; tie = wrong",
+  "tolerances": {
+   "count": 0.0,
+   "year": 0.0,
+   "sum_avg_max_share": 0.001,
+   "tenure": 0.01
+  },
+  "full_run": {
+   "repeats": 3,
+   "tiers": [
+    "single",
+    "compound"
+   ]
+  },
+  "shakedown": {
+   "repeats": 1,
+   "tiers": [
+    "single"
+   ],
+   "decision_rules_apply": false
+  }
+ },
+ "note": "Committed before any LLM run. The shakedown is not a verdict (see exp_rules.py)."
+}
