@@ -169,6 +169,12 @@ with tempfile.TemporaryDirectory() as tmp:
     json.dump(pre, open(er.PREREG, "w"))
     check("changing a rule after the fact cannot be hidden: write_prereg refuses to overwrite a differing pre-registration", er.write_prereg() == 2)
     check("the guard prints the run number and last run first", er.guard_llm(questions, git=clean_git)[1][0].startswith("EXPERIMENT RUN #1"))
+    with open(er.RUNS_LOG, "w") as f:
+        f.write(json.dumps({"ts": "2026-11-05T13:19:07", "commit": "65054ac3", "pass": "full", "runs": 69, "stopped": "daily_quota"}) + "\n")
+        f.write(json.dumps({"ts": "2026-11-06T09:00:00", "attest": True, "pass": "full", "system_sha": "x"}) + "\n")
+    ok, lines, _ = er.guard_llm(questions, git=clean_git)
+    check("an attestation line in RUNS.jsonl is not mistaken for a run (it has no commit, and must not crash the guard)",
+          ok and lines[0].startswith("EXPERIMENT RUN #2") and "65054ac3" in lines[0], lines)
     er.PREREG, er.RUNS_LOG = old
 
 def rec(qid, arm, rep, outcome, note=False, tier="single", kind="value", tag="x"):

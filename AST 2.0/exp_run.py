@@ -324,8 +324,8 @@ def guard_llm(questions: list, git=cs.git_state):
         return False, ["REFUSED: the generated tables no longer match PREREG.json."], commit
     if pre["model"] != model_pin():
         return False, [f"REFUSED: the model or temperature differs from the pinned one ({pre['model']} vs {model_pin()})."], commit
-    runs = cs.read_log(RUNS_LOG)
-    last = runs[-1] if runs else None
+    sessions = [r for r in cs.read_log(RUNS_LOG) if not r.get("attest")]   # attestations share the log but are not runs
+    runs, last = sessions, (sessions[-1] if sessions else None)
     return True, [f"EXPERIMENT RUN #{len(runs) + 1}  |  last run: {last['ts'] + ' @ ' + last['commit'][:8] + ' (' + last['pass'] + ')' if last else 'never'}  |  "
                   f"model {pre['model']['code_model']}"], commit
 
