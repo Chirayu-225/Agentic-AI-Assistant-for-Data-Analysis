@@ -117,7 +117,9 @@ with tempfile.TemporaryDirectory() as tmp:
     p2 = os.path.join(tmp, "q.jsonl")
     s3 = er.run_pass("mechanical", "t", "single", 1, 7, p2, questions, cases, out=out.append)
     s4 = er.run_pass("mechanical", "t", "single", 1, 7, p2, questions, cases, out=out.append)
-    check("--max-runs stops cleanly and the next call resumes where it stopped", s3["runs"] == 7 and s3["stopped"] == "max_runs" and s4["runs"] == 7 and len({(r["qid"], r["arm"]) for r in map(json.loads, open(p2))}) == 14)
+    blocks_ok = all(len({r["arm"] for r in rs}) == 3 for rs in (lambda d: [[r for r in d if r["qid"] == q] for q in {r["qid"] for r in d}])([json.loads(l) for l in open(p2)]))
+    check("--max-runs is checked BETWEEN question blocks (never mid-block), and the next call resumes where it stopped",
+          s3["runs"] == 9 and s3["stopped"] == "max_runs" and s4["runs"] == 9 and len({(r["qid"], r["arm"]) for r in map(json.loads, open(p2))}) == 18 and blocks_ok, (s3["runs"], s4["runs"]))
     first = [json.loads(l) for l in open(p2)][:3]
     check("all arms of a question run together (blocking by question)", {r["qid"] for r in first} == {first[0]["qid"]} and [r["arm"] for r in first] == ["clean", "dirty", "stage0"])
 
@@ -210,10 +212,11 @@ def drive(plan, pace, max_attempts=None):
 
 summ, recs, _, again = drive(["ok", "quota"], pace=False)
 check("without --pace a quota error stops the run after recording it", summ["stopped"] == "daily_quota" and [r["outcome"] for r in recs[:2]] == ["correct", "infra_error"])
-check("on resume the refused cell is run AGAIN (an infra error is not a result), and only the unfinished cells run",
-      again["runs"] == 2 and [(r["arm"], r["outcome"]) for r in recs] == [("clean", "correct"), ("dirty", "infra_error"), ("dirty", "wrong" if recs[2]["outcome"] == "wrong" else "correct"), ("stage0", recs[3]["outcome"])], [(r["arm"], r["outcome"]) for r in recs])
+check("on resume the unfinished BLOCK is re-run in full (a question's arms never straddle a pause), refused cell included",
+      again["runs"] == 3 and [(r["arm"], r["outcome"] == "infra_error") for r in recs] == [("clean", False), ("dirty", True), ("clean", False), ("dirty", False), ("stage0", False)], [(r["arm"], r["outcome"]) for r in recs])
 m, inf = ea.collapse(recs)
-check("the refused attempt stays in the file, counted as infra and excluded from every rate", inf[(one_q[0]["id"], "dirty")] == 1 and (one_q[0]["id"], "dirty") in m and m[(one_q[0]["id"], "dirty")]["n"] == 1)
+check("a cell that was run again counts ONCE (the latest record wins), and the refused attempt stays in the file as infra",
+      inf[(one_q[0]["id"], "dirty")] == 1 and m[(one_q[0]["id"], "clean")]["n"] == 1 and m[(one_q[0]["id"], "dirty")]["n"] == 1)
 summ, recs, sleeps, _ = drive(["ok", "quota", "quota"], pace=True)
 check("--pace waits out the provider and retries the SAME run until it is served (no substitution, no stop)",
       summ["stopped"] is None and sleeps == [7.0, 7.0] and [(r["arm"], r["outcome"]) for r in recs][:4] == [("clean", "correct"), ("dirty", "infra_error"), ("dirty", "infra_error"), ("dirty", recs[3]["outcome"])] and len(recs) == 5, (sleeps, [(r["arm"], r["outcome"]) for r in recs]))
@@ -233,6 +236,70 @@ rep = ea.report([dict(rec("a1", "clean", 1, "correct"), tag="x", calls=1), dict(
                  {"id": "a2", "tag": "x", "tier": "single", "kind": "value", "expected": "1", "question": "?"}])
 check("the report names the questions the model never saw (answered by the rule-based shortcut), but not crashes", "WITHOUT the model" in rep and "a1" in rep.split("WITHOUT the model")[1].split("\n")[0] and "a2" not in rep.split("WITHOUT the model")[1].split("\n")[0])
 
+# ── the system under test is frozen: stamps, fingerprint, continuity, attestation ──
+import shutil
+files = er.system_files()
+check("the system under test is found by reading imports (the analysis path, the join path, the cleaner, Stage 0, the provider)",
+      {"analysis_service.py", "llm_provider.py", "clean_read.py", "cleaning.py", "file_reader.py", "multi_table_service.py", "clean_adapter_stage0.py"} <= set(files), files)
+check("... and it excludes the harness, the tests, the benchmark and the API (deployment work cannot trip the guard)",
+      not ({"exp_run.py", "exp_analyze.py", "test_exp.py", "clean_bench.py", "clean_score.py", "api.py"} & set(files)), files)
+with tempfile.TemporaryDirectory() as tmp:
+    for name, body in (("analysis_service.py", "import helper\n"), ("helper.py", "X = 1\n"), ("unrelated.py", "Y = 1\n")):
+        open(os.path.join(tmp, name), "w").write(body)
+    f0 = er.fingerprint(tmp)
+    open(os.path.join(tmp, "unrelated.py"), "w").write("Y = 2\n")
+    f1 = er.fingerprint(tmp)
+    open(os.path.join(tmp, "helper.py"), "w").write("X = 2\n")
+    f2 = er.fingerprint(tmp)
+check("editing a file the experiment imports changes the fingerprint; editing an unrelated file does not", f0 == f1 and f1 != f2)
+stamp = {"commit": "abc", "model": "m", "temperature": 0.1, "system_sha": "s1"}
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, "s.jsonl")
+    er.run_pass("mechanical", "t", "single", 1, 0, path, one_q, cases, out=lambda *_: None, stamp=stamp)
+    recs = [json.loads(l) for l in open(path)]
+    check("every cell carries its commit, model, temperature and system fingerprint", all(all(r.get(k) == v for k, v in stamp.items()) for r in recs) and len(recs) == 3)
+    ok, why = er.check_continuity(path, "t", "s1", [])
+    check("a resume on the same system is allowed", ok)
+    ok, why = er.check_continuity(path, "t", "s2", [])
+    check("a resume after the system under test changed is REFUSED (the early and late cells would be different systems)", not ok and "different version" in why, why)
+    legacy = os.path.join(tmp, "legacy.jsonl")
+    with open(legacy, "w") as f:
+        for r in recs:
+            f.write(json.dumps({k: v for k, v in r.items() if k not in stamp}) + "\n")
+    ok, why = er.check_continuity(legacy, "t", "s1", [])
+    check("unstamped cells block a resume until someone attests to them", not ok and "attest" in why, why)
+    ok, _ = er.check_continuity(legacy, "t", "s1", [{"attest": True, "pass": "t", "system_sha": "s1"}])
+    check("... and an attestation for THIS system unblocks it", ok)
+    ok, _ = er.check_continuity(legacy, "t", "s1", [{"attest": True, "pass": "t", "system_sha": "OTHER"}])
+    check("... but an attestation for a different system does not", not ok)
+
+with tempfile.TemporaryDirectory() as tmp:
+    log = os.path.join(tmp, "RUNS.jsonl")
+    open(log, "w").write(json.dumps({"ts": "2026-11-05T13:19:07", "commit": "c0c0", "pass": "full", "runs": 69, "stopped": "daily_quota"}) + "\n")
+    sysf = lambda root=None: None
+    out = []
+    only_provider = lambda c0: ["llm_provider.py", "exp_run.py", "test_exp.py"]
+    additions = lambda c0, name: ["+def last_rate_limit():", "+    return None"]
+    rc = er.attest("full", changed=only_provider, diff=additions, log_path=log, out=out.append)
+    recs_ = [json.loads(l) for l in open(log)]
+    check("attest: harness-only changes plus pure additions to the provider are vouched for, with what was checked recorded",
+          rc == 0 and recs_[-1]["attest"] and recs_[-1]["system_sha"] == er.fingerprint() and recs_[-1]["verified"]["llm_provider_pure_additions"] == 2, out)
+    n_before = len(open(log).readlines())
+    rc = er.attest("full", changed=lambda c0: ["clean_read.py"], diff=additions, log_path=log, out=out.append)
+    check("attest REFUSES when a file the experiment imports (the reader) changed", rc == 2 and len(open(log).readlines()) == n_before and "clean_read.py" in out[-1], out[-1])
+    rc = er.attest("full", changed=only_provider, diff=lambda c0, n: ["-    _MAX_RETRY_WAIT_S = 20.0", "+    _MAX_RETRY_WAIT_S = 30.0"], log_path=log, out=out.append)
+    check("attest REFUSES when the provider diff removes or edits a line (a retry or model setting could have moved)", rc == 2 and "removed or edited" in out[-1], out[-1])
+    check("attest refuses a pass that has no session in the log", er.attest("nope", changed=only_provider, diff=additions, log_path=log, out=out.append) == 2)
+
+ok_cells = [dict(rec("a", "clean", 1, "correct"), system_sha="s1", model="m", temperature=0.1), dict(rec("a", "dirty", 1, "correct"), system_sha="s1", model="m", temperature=0.1)]
+check("validity: one system, one model, one temperature -> valid", ea.validity(ok_cells, [])[0])
+mixed = ok_cells + [dict(rec("b", "clean", 1, "correct"), system_sha="s2", model="m", temperature=0.1)]
+check("validity: cells from two versions of the system -> INVALID", not ea.validity(mixed, [])[0])
+check("validity: two models or two temperatures -> INVALID", not ea.validity(ok_cells + [dict(rec("b", "clean", 1, "correct"), system_sha="s1", model="other", temperature=0.1)], [])[0]
+      and not ea.validity(ok_cells + [dict(rec("b", "clean", 1, "correct"), system_sha="s1", model="m", temperature=0.5)], [])[0])
+legacy_cells = [rec("z", "clean", 1, "correct")]
+check("validity: unstamped cells need an attestation for the system that produced the rest", not ea.validity(legacy_cells + ok_cells, [])[0]
+      and ea.validity(legacy_cells + ok_cells, [{"system_sha": "s1"}])[0] and not ea.validity(legacy_cells + ok_cells, [{"system_sha": "s9"}])[0])
 # ── dry run: tokens, not correctness ─────────────────────────────────────────
 rows = [{"outcome": "wrong", "calls": 1, "tokens_prompt": 1500, "tokens_completion": 300}, {"outcome": "correct", "calls": 2, "tokens_prompt": 3000, "tokens_completion": 700},
         {"outcome": "infra_error", "calls": 0, "tokens_prompt": 0, "tokens_completion": 0}]
@@ -334,6 +401,12 @@ txt = ea.report(full, qs, decide_flag=True)
 check("a full run (3 repeats, both tiers) evaluates the pre-registered rules", "DECISION (pre-registered rules, full run)" in txt and "validators:" in txt)
 g = ea.gap_closed(qs, ea.collapse(recs)[0], "value")
 check("gap closed is reported only where clean - dirty is at least 20 points", g["closed"] is not None and ea.gap_closed(synth(n_single=30, dirty_wrong_single=2)[0], ea.collapse(synth(n_single=30, dirty_wrong_single=2)[1])[0], "value")["closed"] is None)
+
+qs_v, recs_v = synth(n_single=30, dirty_wrong_single=15)
+for r in recs_v:
+    r["pass"], r["repeat"] = "full", 3
+txt = ea.report(recs_v, qs_v, decide_flag=True, check=(False, ["   INVALID: test"]))
+check("a decision is REFUSED on an invalid run, however clear the gap looks", "DECISION: refused" in txt and "BUILD" not in txt)
 
 print()
 if FAIL:

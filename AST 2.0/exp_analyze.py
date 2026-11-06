@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 from collections import Counter, defaultdict
 
@@ -33,12 +34,14 @@ def load_records(paths) -> list:
 
 def collapse(records: list):
     """Repeats -> one verdict per (question, arm). Infra errors are excluded and counted, never substituted."""
-    by, infra = defaultdict(list), Counter()
+    by, infra, latest = defaultdict(list), Counter(), {}
     for r in records:
         if r["outcome"] == "infra_error":
             infra[(r["qid"], r["arm"])] += 1
         else:
-            by[(r["qid"], r["arm"])].append(r)
+            latest[(r["qid"], r["arm"], r["repeat"])] = r   # a cell that was run again supersedes its earlier record
+    for (qid, arm, _), r in latest.items():
+        by[(qid, arm)].append(r)
     maj = {}
     for k, rs in by.items():
         c = Counter(r["outcome"] for r in rs)
@@ -110,6 +113,24 @@ def gap_closed(questions, maj, kind, tier=None):
     return {"n": len(qs), "acc": acc, "closed": (acc["stage0"] - acc["dirty"]) / gap if gap >= R["gap_closed_min_clean_minus_dirty"] else None}
 
 
+def validity(records: list, attestations: list) -> tuple:
+    """-> (ok, lines). A run is valid only if every cell came from ONE version of the system under test, one model and one
+    temperature. Cells without a stamp are valid only if an attestation (checked against git) covers the current system."""
+    cells = [r for r in records if r["outcome"] != "infra_error"]
+    stamped = [r for r in cells if r.get("system_sha")]
+    legacy = [r for r in cells if not r.get("system_sha")]
+    shas, models, temps = ({r[k] for r in stamped} for k in ("system_sha", "model", "temperature"))
+    attested = {a["system_sha"] for a in attestations}
+    lines, ok = [f"   validity: {len(stamped)} stamped cell(s), {len(legacy)} unstamped; system versions {sorted(shas) or 'none'}, models {sorted(models)}, temperatures {sorted(temps)}"], True
+    if len(shas) > 1 or len(models) > 1 or len(temps) > 1:
+        ok = False
+        lines.append("   INVALID: the cells were not all produced by one system, model and temperature, so the pooled number is meaningless.")
+    if legacy and not (shas <= attested if shas else attested):
+        ok = False
+        lines.append(f"   INVALID: {len(legacy)} unstamped cell(s) have no attestation for this system (python exp_run.py --attest --pass <name>).")
+    return ok, lines
+
+
 def is_shakedown(records: list) -> bool:
     if any(r["pass"].startswith("shakedown") for r in records):
         return True
@@ -129,7 +150,7 @@ def per_tag_table(questions, maj, infra) -> list:
     return L
 
 
-def report(records: list, questions: list, decide_flag: bool = False) -> str:
+def report(records: list, questions: list, decide_flag: bool = False, check: tuple = None) -> str:
     maj, infra = collapse(records)
     shake = is_shakedown(records)
     mech = all(r["solver"] == "mechanical" for r in records)
@@ -138,6 +159,8 @@ def report(records: list, questions: list, decide_flag: bool = False) -> str:
         L.append("MECHANICAL SOLVER (not an LLM): plumbing and question sanity only. It says nothing about what a model does.\n")
     if shake:
         L.append("SHAKEDOWN: one repeat cannot support a decision, so no decision rule is evaluated and this must not be quoted as the result.\n")
+    if check:
+        L += check[1] + [""]
     llm = [r for r in records if r["solver"] == "llm"]
     calls = sum(r["calls"] for r in llm)
     if llm and calls:
@@ -169,7 +192,9 @@ def report(records: list, questions: list, decide_flag: bool = False) -> str:
     s0 = stage0_wiring(questions, maj)
     L += ["", "5. Stage 0 vs dirty", "   structural (stage0 ok / dirty ok / n): " + ", ".join(f"{t} {v[0]}/{v[1]}/{v[2]}" for t, v in sorted(s0["structural_per_tag"].items())),
           f"   new crashes: {s0['new_crashes'] or 'none'}   non-structural questions net worse: {s0['net_worse']}"]
-    if decide_flag and not shake:
+    if decide_flag and check and not check[0]:
+        L += ["", "DECISION: refused. The run is not valid (see the validity lines at the top)."]
+    elif decide_flag and not shake:
         L += ["", "DECISION (pre-registered rules, full run)", f"   validators: {decide(h_single, h_comp)}", f"   stage 0:    {s0['verdict']}"]
     elif decide_flag:
         L += ["", "DECISION: not evaluated (shakedown)."]
@@ -182,7 +207,10 @@ def main(argv=None) -> int:
     ap.add_argument("--decide", action="store_true")
     a = ap.parse_args(argv)
     _, questions = eq.build_exp()
-    print(report(load_records(a.files), questions, a.decide))
+    records = load_records(a.files)
+    log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval_data", "exp", "RUNS.jsonl")
+    att = [json.loads(l) for l in open(log, encoding="utf-8") if l.strip() and json.loads(l).get("attest")] if os.path.exists(log) else []
+    print(report(records, questions, a.decide, check=validity(records, att) if any(r["solver"] == "llm" for r in records) else None))
     return 0
 
 

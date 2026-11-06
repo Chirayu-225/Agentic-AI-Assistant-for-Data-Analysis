@@ -19,9 +19,13 @@ each question can actually be broken by its defect; it says nothing about what a
 from __future__ import annotations
 
 import argparse
+import ast
+import collections
 import datetime as dt
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import tracemalloc
@@ -39,6 +43,104 @@ ARMS = tuple(exp_rules.RULES["arms"])
 ANALYSIS_TEMPERATURE = {"first_attempt": 0.1, "repair": 0.0}   # fixed in analysis_service.py
 SLEEP = time.sleep           # patched in tests
 MAX_PACE_ATTEMPTS = 12       # waits per run before giving up on a run in pace mode
+
+
+# ── the system under test must not change mid-run ────────────────────────────
+SYSTEM_ROOTS = ("analysis_service", "multi_table_service", "clean_adapter_stage0", "cleaning", "file_reader")
+
+
+def system_files(root: str = HERE) -> list:
+    """Every local module the experiment can execute: the import closure of the analysis path, the join path and the
+    Stage 0 adapter, found by reading the code (not by running it). Tests, the harness and the benchmark are not in it."""
+    todo, seen = list(SYSTEM_ROOTS), set()
+    while todo:
+        name = todo.pop()
+        path = os.path.join(root, name + ".py")
+        if name in seen or not os.path.exists(path):
+            continue
+        seen.add(name)
+        for node in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
+            if isinstance(node, ast.Import):
+                todo += [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                todo.append(node.module.split(".")[0])
+    return sorted(n + ".py" for n in seen)
+
+
+def fingerprint(root: str = HERE) -> str:
+    h = hashlib.sha256()
+    for f in system_files(root):
+        h.update(f.encode())
+        h.update(open(os.path.join(root, f), "rb").read())
+    return h.hexdigest()[:16]
+
+
+def make_stamp(commit) -> dict:
+    pin = model_pin()
+    return {"commit": commit, "model": pin["code_model"], "temperature": pin["analysis_temperature"]["first_attempt"],
+            "system_sha": fingerprint()}
+
+
+def check_continuity(path: str, pass_name: str, current: str, runs: list) -> tuple:
+    """A resume must continue the same system. -> (ok, message). Cells stamped with another fingerprint, or unstamped
+    cells nobody has attested to, make the pooled number meaningless, so the run refuses to continue."""
+    if not os.path.exists(path):
+        return True, ""
+    cells = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    shas = {c["system_sha"] for c in cells if c.get("system_sha")}
+    if shas - {current}:
+        return False, (f"REFUSED: cells in this pass were produced by a different version of the system under test "
+                       f"({sorted(shas - {current})} vs now {current}). Restore the code, or start a new pass.")
+    legacy = [c for c in cells if not c.get("system_sha") and c["outcome"] != "infra_error"]
+    attested = {r["system_sha"] for r in runs if r.get("attest") and r.get("pass") == pass_name}
+    if legacy and current not in attested:
+        return False, (f"REFUSED: {len(legacy)} cell(s) predate per-cell stamping and have not been attested for this system. "
+                       f"Run: python exp_run.py --attest --pass {pass_name}")
+    return True, ""
+
+
+def git_changed(c0: str, root: str = HERE) -> list:
+    out = subprocess.run(["git", "-C", root, "diff", "--name-only", c0, "HEAD"], capture_output=True, text=True, timeout=60).stdout
+    return [os.path.basename(p) for p in out.splitlines() if p.strip()]
+
+
+def git_diff_lines(c0: str, name: str, root: str = HERE) -> list:
+    out = subprocess.run(["git", "-C", root, "diff", c0, "HEAD", "--", name], capture_output=True, text=True, timeout=60).stdout
+    return [l for l in out.splitlines() if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+
+
+def attest(pass_name: str, changed=git_changed, diff=git_diff_lines, log_path: str = None, out=print) -> int:
+    """Vouches for cells recorded before per-cell stamping, but only after CHECKING git: the system's files must be
+    identical to the first session's commit, except llm_provider.py, whose diff must be pure additions (no line removed
+    or edited, so no retry/backoff/model/temperature setting can have moved)."""
+    log_path = log_path or RUNS_LOG
+    runs = cs.read_log(log_path)
+    first = next((r for r in runs if r.get("pass") == pass_name and not r.get("attest")), None)
+    if not first:
+        out(f"No session of pass '{pass_name}' in the log.")
+        return 2
+    touched = [f for f in changed(first["commit"]) if f in system_files()]
+    bad = [f for f in touched if f != "llm_provider.py"]
+    extra = []
+    if "llm_provider.py" in touched:
+        lines = diff(first["commit"], "llm_provider.py")
+        removed = [l for l in lines if l.startswith("-")]
+        if removed:
+            bad.append("llm_provider.py (lines removed or edited)")
+        extra = [l for l in lines if l.startswith("+")]
+    if bad:
+        out(f"REFUSED: the system under test changed since the first session ({first['commit'][:8]}): {bad}")
+        return 2
+    rec = {"ts": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(), "attest": True, "pass": pass_name,
+           "system_sha": fingerprint(), "since_commit": first["commit"],
+           "verified": {"system_files_unchanged_except": touched, "llm_provider_pure_additions": len(extra)},
+           "covers": "cells of this pass recorded without a system_sha"}
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+    out(f"attested: the system files are unchanged since {first['commit'][:8]}" + (f" apart from {len(extra)} added line(s) in llm_provider.py" if extra else "")
+        + f"; system_sha {rec['system_sha']}. Commit RUNS.jsonl.")
+    return 0
 
 
 # ── the tables the arms analyse ──────────────────────────────────────────────
@@ -147,12 +249,13 @@ def _snap():
     return dict(lp.token_stats()), lp.usage_stats().get("calls", 0)
 
 
-def run_one(q: dict, arm: str, repeat: int, case: tuple, solver_name: str, pass_name: str) -> dict:
+def run_one(q: dict, arm: str, repeat: int, case: tuple, solver_name: str, pass_name: str, stamp: dict = None) -> dict:
     _, files, doc = case
     data, why, prep_s, prep_mb = prepare(arm, files, doc)
     rec = {"ts": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(), "pass": pass_name, "qid": q["id"],
            "tag": q["tag"], "tier": q["tier"], "kind": q["kind"], "arm": arm, "repeat": repeat, "expected": q["expected"],
-           "solver": solver_name, "prep_s": prep_s, "prep_peak_mb": prep_mb, "calls": 0, "tokens_prompt": 0, "tokens_completion": 0}
+           "solver": solver_name, "prep_s": prep_s, "prep_peak_mb": prep_mb, "calls": 0, "tokens_prompt": 0, "tokens_completion": 0,
+           **(stamp or {})}
     if data is None:
         result = {"success": False, "resultType": "error", "resultData": None, "error": f"ARM_CRASH: {why}"}
         rec["latency_s"] = 0.0
@@ -248,25 +351,36 @@ def provider_wait(rec: dict) -> float:
     return 900.0 if "daily ai usage limit" in rec["detail"].lower() else 120.0
 
 
-def run_pass(solver_name, pass_name, tier, repeats, max_runs, path, questions, cases, out=print, pace=False) -> dict:
+def run_pass(solver_name, pass_name, tier, repeats, max_runs, path, questions, cases, out=print, pace=False, stamp=None) -> dict:
     """pace=True: when the provider refuses a run, wait for its quota bucket to refill and retry the SAME run
-    (same question, arm and repeat: nothing is substituted), so one unattended session can span days."""
+    (same question, arm and repeat: nothing is substituted), so one unattended session can span days.
+    A question's arms are a BLOCK: they run together, and a block left unfinished by an earlier session is re-run in
+    full on resume, so one question's arms never straddle a pause (the day-confound blocking was meant to remove)."""
     done, n, outcomes, stopped = load_done(path), 0, {}, None
     chosen = [q for q in questions if tier in ("all", q["tier"])]
+    blocks = collections.defaultdict(set)
+    for (qid, arm, rep) in done:
+        blocks[(qid, rep)].add(arm)
+    unfinished = sorted(k for k, arms in blocks.items() if len(arms) < len(ARMS))
+    if unfinished:
+        for key in [k for k in done if (k[0], k[2]) in unfinished]:
+            del done[key]
+        out(f"  resuming: re-running {len(unfinished)} unfinished question block(s) in full: {', '.join(f'{q} r{r}' for q, r in unfinished)}")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tot = {"calls": 0, "tokens_prompt": 0, "tokens_completion": 0}
     try:
         for rep in range(1, repeats + 1):
             for q in chosen:
-                for arm in ARMS:
-                    if (q["id"], arm, rep) in done:
-                        continue
-                    if max_runs and n >= max_runs:
-                        stopped = "max_runs"
-                        break
+                todo = [arm for arm in ARMS if (q["id"], arm, rep) not in done]
+                if not todo:
+                    continue
+                if max_runs and n >= max_runs:   # the budget is checked between blocks, never inside one
+                    stopped = "max_runs"
+                    break
+                for arm in todo:
                     attempts = 0
                     while True:
-                        rec = run_one(q, arm, rep, cases[q["case_id"]], solver_name, pass_name)
+                        rec = run_one(q, arm, rep, cases[q["case_id"]], solver_name, pass_name, stamp)
                         with open(path, "a", encoding="utf-8") as f:
                             f.write(json.dumps(rec) + "\n")
                         n += 1
@@ -343,11 +457,14 @@ def main(argv=None, git=cs.git_state) -> int:
     ap.add_argument("--write-prereg", action="store_true")
     ap.add_argument("--force-prereg", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--attest", action="store_true", help="vouch (after checking git) for cells recorded before per-cell stamping")
     ap.add_argument("--pace", action="store_true", help="wait out the provider's refilling quota and carry on (one unattended session)")
     ap.add_argument("--tpd", type=int, default=200000, help="the provider's tokens-per-day limit (200000 seen on Groq's free tier)")
     a = ap.parse_args(argv)
     if a.write_prereg:
         return write_prereg(a.force_prereg)
+    if a.attest:
+        return attest(a.pass_name)
     cases, questions = eq.build_exp()
     if a.dry_run:
         print("DRY RUN: 5 real model runs. Prints tokens and latency only; correctness is neither shown nor stored.")
@@ -367,13 +484,18 @@ def main(argv=None, git=cs.git_state) -> int:
         print("\n".join(lines))
         if not ok:
             return 2
+        ok, why = check_continuity(os.path.join(RESULTS_DIR, f"{a.pass_name}-{a.solver}.jsonl"), a.pass_name, fingerprint(), cs.read_log(RUNS_LOG))
+        if not ok:
+            print(why)
+            return 2
     else:
         print("MECHANICAL solver: no model is called. This is plumbing and question sanity, not evidence about a model.")
     path = os.path.join(RESULTS_DIR, f"{a.pass_name}-{a.solver}.jsonl")
-    summary = run_pass(a.solver, a.pass_name, a.tier, a.repeats, a.max_runs, path, questions, cases, pace=a.pace)
+    summary = run_pass(a.solver, a.pass_name, a.tier, a.repeats, a.max_runs, path, questions, cases, pace=a.pace,
+                       stamp=make_stamp(commit) if a.solver == "llm" else None)
     print(f"\n{summary['runs']} runs {summary['outcomes']}" + (f"  STOPPED: {summary['stopped']} (commit the log line, then re-run the same command to resume)" if summary["stopped"] else ""))
     if a.solver == "llm":
-        append_log(commit, a.pass_name, a.solver, a.tier, a.repeats, summary)
+        append_log(commit, a.pass_name, a.solver, a.tier, a.repeats, {**summary, "system_sha": fingerprint()})
         print(f"logged to RUNS.jsonl (commit it before the next LLM run); results: {path}")
     else:
         print(f"results: {path}")
