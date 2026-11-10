@@ -513,7 +513,10 @@ def build_defect_fix_prompt(defects: list[dict], schema_text: str) -> str:
         "for a column with many variants, normalise with string methods and "
         "map only the variants named in the defect — never write one mapping "
         "entry per distinct value. Don't drop columns or rows; if a column is "
-        "mostly empty, leave it as-is and note that in REASONING."
+        "mostly empty, leave it as-is and note that in REASONING. "
+        "Iterating a DataFrame (`for c in df.columns`) gives column NAMES "
+        "(plain strings), so use df[c] to get the column; select text columns "
+        "with df.select_dtypes(include=['object','string'])."
     )
     return "\n".join(lines)
 

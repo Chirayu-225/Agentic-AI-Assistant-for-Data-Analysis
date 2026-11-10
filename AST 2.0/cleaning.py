@@ -86,7 +86,7 @@ def _parse_dates(series: pd.Series) -> tuple[pd.Series, str]:
                 "left as text; fix the source so one convention is used")
         if month_first_evidence:
             dayfirst = False
-            note = "read as month-first (MM/DD/YYYY): some values have a month part above 12"
+            note = "read as month-first (MM/DD/YYYY): some values have a day part above 12"
         elif day_first_evidence:
             note = "read as day-first (DD/MM/YYYY): some values have a day above 12"
         else:
@@ -363,7 +363,11 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) 
             continue
 
         series = df_c[col].astype(str).str.strip()
-        present = ~series.str.lower().isin(_SENTINELS)
+        # pandas 3 keeps a real missing value as NaN under astype(str) instead
+        # of the text "nan", so the sentinel check alone no longer excludes it.
+        # A blank must not count as a present value, or a column with more than
+        # 20% blanks could never reach the 80% parse threshold below.
+        present = df_c[col].notna() & ~series.str.lower().isin(_SENTINELS)
         n_present = int(present.sum())
         if n_present == 0:
             continue
