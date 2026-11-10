@@ -30,6 +30,8 @@ import hmac
 import math
 import os
 import time
+import traceback
+import uuid
 
 from dotenv import load_dotenv
 load_dotenv(override=True)  # .env always wins over a stale shell variable (e.g. an old `set PYTHON_SERVICE_SECRET=...`); reads .env in this folder — see .env.example for what's needed
@@ -96,6 +98,33 @@ def _client_ip(request: Request) -> str:
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+SAFE_ERROR_MESSAGE = "Something went wrong."
+
+
+def _safe_error_text(exc: BaseException) -> str:
+    """Log the full trace server-side under a short reference id and return the only text a user may see.
+    The id lets us find the trace; nothing from the exception (message, path, file name) reaches the response."""
+    ref = uuid.uuid4().hex[:8]
+    trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(f"[api] unexpected error ref={ref}\n{trace}", flush=True)
+    return f"{SAFE_ERROR_MESSAGE} Reference: {ref}"
+
+
+def _server_error(exc: BaseException, **shape) -> dict:
+    """The catch-all response for a route: the usual {success, ..., error} dict with the safe text. Extra keys
+    (resultType / resultData for /analyze) keep the shape the frontend already expects."""
+    return {"success": False, **shape, "error": _safe_error_text(exc)}
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Anything a route did not catch itself. Returns HTTP 200, NOT 500, on purpose: lib/pythonClient.ts throws
+    "Python service error (500): <raw body>" for every non-OK response, which would show the raw body to the user and
+    skip the normal error display, while our other catch-all returns are 200 plus the standard {success: false, error}
+    dict. HTTPException (401 bad secret, 429 rate limit, ...) has its own handler and is not affected."""
+    return JSONResponse({"success": False, "error": _safe_error_text(exc)}, status_code=200)
 
 
 @app.middleware("http")
@@ -338,10 +367,7 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
         try:
             return run_analysis_from_cleaned_df(cached.cleaned_df, req.query, req.sessionId)
         except Exception as e:
-            return {
-                "success": False, "resultType": "error", "resultData": None,
-                "error": f"Unexpected server error: {e}",
-            }
+            return _server_error(e, resultType="error", resultData=None)
 
     content, err = _fetch_blob(req.fileUrl)
     if err is not None:
@@ -354,10 +380,7 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
         # guards, but a public endpoint should never return a raw 500
         # regardless. If this ever fires, it means something slipped past
         # those internal guards and is worth investigating directly.
-        return {
-            "success": False, "resultType": "error", "resultData": None,
-            "error": f"Unexpected server error: {e}",
-        }
+        return _server_error(e, resultType="error", resultData=None)
 
 
 @app.post("/rag/index")
@@ -372,7 +395,7 @@ def rag_index(req: RagIndexRequest, x_service_secret: str = Header(default="")):
     try:
         return index_document(content, req.filename, req.sessionId)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/rag/query")
@@ -383,7 +406,7 @@ def rag_query(req: RagQueryRequest, x_service_secret: str = Header(default="")):
     try:
         return answer_question(req.docId, req.query, req.filename)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/rag/insights")
@@ -394,7 +417,7 @@ def rag_insights(req: RagInsightsRequest, x_service_secret: str = Header(default
     try:
         return get_insights(req.docId, req.filename)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/profile")
@@ -410,7 +433,7 @@ def profile(req: ProfileRequest, x_service_secret: str = Header(default="")):
         return cache_layer.cached_result(
             "profile", content, lambda: get_profile(content, req.filename), extra=req.filename)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/clean")
@@ -426,7 +449,7 @@ def clean(req: CleanRequest, x_service_secret: str = Header(default="")):
         return cache_layer.cached_result(
             "clean", content, lambda: get_cleaning_report(content, req.filename), extra=req.filename)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 DATA_CHECKS_ERROR = "Data checks are unavailable for this file."
@@ -488,7 +511,7 @@ def clean_agent(req: CleanAgentRequest, x_service_secret: str = Header(default="
     try:
         return run_cleaning_agent(content, req.filename, req.sessionId)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/auto-analyze")
@@ -506,7 +529,7 @@ def auto_analyze(req: AutoAnalyzeRequest, x_service_secret: str = Header(default
     try:
         return run_auto_analyze(content, req.filename, req.sessionId)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/auto-analyze/follow-up")
@@ -527,7 +550,7 @@ def auto_analyze_followup(req: FollowUpRequest, x_service_secret: str = Header(d
             req.sessionId,
         )
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.post("/multi-table/query")
@@ -548,7 +571,7 @@ def multi_table_query(req: MultiTableQueryRequest, x_service_secret: str = Heade
     try:
         return run_multi_table_query(datasets, req.query, req.sessionId)
     except Exception as e:
-        return {"success": False, "error": f"Unexpected server error: {e}"}
+        return _server_error(e)
 
 
 @app.get("/admin/stats")

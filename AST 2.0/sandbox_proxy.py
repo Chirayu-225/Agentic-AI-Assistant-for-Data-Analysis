@@ -526,6 +526,49 @@ class _ModuleProxy:
         raise AttributeError("assigning module attributes is not permitted in the sandbox")
 
 
+def _pandas_fallbacks():
+    """second argument of np.issubdtype -> pandas' answer for an ExtensionDtype. A FIXED table: nothing else falls back."""
+    from pandas.api import types as pdt
+    return {
+        np.number: lambda d: pdt.is_numeric_dtype(d) and not pdt.is_bool_dtype(d),
+        np.integer: pdt.is_integer_dtype,
+        np.floating: pdt.is_float_dtype,
+        np.datetime64: pdt.is_datetime64_any_dtype,
+    }
+
+
+_ISSUBDTYPE_FALLBACKS = _pandas_fallbacks()
+
+
+def _sandbox_issubdtype(arg1, arg2):
+    """np.issubdtype for model code. Numpy's own function answers first and its answer is returned untouched.
+    Under pandas 3 numpy raises TypeError for every pandas extension dtype (string, Int64, category, tz-aware
+    datetime, ...). ONLY when numpy raised TypeError AND arg1 is a pandas ExtensionDtype AND arg2 is one of the four
+    kinds in the table do we ask pandas. Anything else re-raises numpy's own error, so a wrong call is never a silent
+    False. This wraps the sandbox's np only; the real numpy.issubdtype is never patched."""
+    try:
+        return np.issubdtype(arg1, arg2)
+    except TypeError:
+        fallback = _ISSUBDTYPE_FALLBACKS.get(arg2) if isinstance(arg2, type) else None
+        if fallback is None or not isinstance(arg1, pd.api.extensions.ExtensionDtype):
+            raise
+        return bool(fallback(arg1))
+
+
+class _NumpyProxy(_ModuleProxy):
+    """The sandbox's np: the generic allowlist-gated proxy, plus the issubdtype shim above (only if allowlisted)."""
+
+    __slots__ = ()
+
+    def __getattr__(self, name):
+        if name == "issubdtype" and name in object.__getattribute__(self, "_allowed"):
+            def _call(*args, **kwargs):
+                args, kwargs = _unwrap_args(args, kwargs)
+                return _sandbox_issubdtype(*args, **kwargs)
+            return _call
+        return _ModuleProxy.__getattr__(self, name)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # MULTI-TABLE SQL SUPPORT (feature: joining/querying several uploaded
 # datasets at once, DuckDB-backed)
@@ -612,7 +655,7 @@ def build_safe_namespace(df: pd.DataFrame, include_charts: bool = True) -> dict:
     ns = {
         "df": _FrameProxy(df),
         "pd": _ModuleProxy(pd, ALLOWED_PD_FUNCS),
-        "np": _ModuleProxy(np, ALLOWED_NP_FUNCS),
+        "np": _NumpyProxy(np, ALLOWED_NP_FUNCS),
     }
     if include_charts:
         if plt is not None:
@@ -638,7 +681,7 @@ def build_safe_namespace_multi(con, include_charts: bool = False) -> dict:
     ns = {
         "con": SafeDuckDBConnection(con),
         "pd": _ModuleProxy(pd, ALLOWED_PD_FUNCS),
-        "np": _ModuleProxy(np, ALLOWED_NP_FUNCS),
+        "np": _NumpyProxy(np, ALLOWED_NP_FUNCS),
     }
     if include_charts:
         if plt is not None:
