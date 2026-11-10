@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { AnalyzeResponse } from "@/lib/pythonClient";
 import ShowWork from "@/components/ShowWork";
+import type { FormatNote } from "@/lib/formatNotes";
 
 // Plotly touches `window` at import time, so it can only load client-side —
 // dynamic() with ssr:false is required here, not just a style preference.
@@ -44,7 +45,7 @@ export function themeTraces(traces: any[]): any[] {
   });
 }
 
-export default function ResultDisplay({ result, notes }: { result: AnalyzeResponse; notes?: string[] }) {
+export default function ResultDisplay({ result, notes }: { result: AnalyzeResponse; notes?: FormatNote[] }) {
   if (!result.success || result.resultType === "error") {
     return (
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
@@ -93,7 +94,24 @@ export default function ResultDisplay({ result, notes }: { result: AnalyzeRespon
       {notes && notes.length > 0 && (
         <div className="mt-3 space-y-1">
           {notes.map((note, i) => (
-            <p key={i} className="text-xs text-muted">{note}</p>
+            <div key={i}>
+              <p className="text-xs text-muted">{note.text}</p>
+              {note.formats.length > 0 && (
+                <details className="text-xs text-muted">
+                  <summary className="cursor-pointer">Show formats</summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {note.formats.map((f) => (
+                      <li key={f.signature} className="font-mono whitespace-pre-wrap">
+                        {f.signature}  {f.count.toLocaleString()} rows  e.g. {f.example}
+                      </li>
+                    ))}
+                    {note.moreFormats > 0 && (
+                      <li>and {note.moreFormats.toLocaleString()} more formats</li>
+                    )}
+                  </ul>
+                </details>
+              )}
+            </div>
           ))}
         </div>
       )}

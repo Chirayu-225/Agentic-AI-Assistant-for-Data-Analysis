@@ -23,6 +23,7 @@ testing — this one can be fully exercised without streamlit installed.
 from __future__ import annotations
 
 import io
+import re
 
 import numpy as np
 import pandas as pd
@@ -113,6 +114,20 @@ def get_profile(csv_bytes: bytes, filename: str, preview_rows: int = 10) -> dict
         return {"success": False, "error": f"Profiling failed: {e}"}
 
 
+_SIDE_COLUMN = re.compile(r".+_original(_\d+)?")
+
+
+def _null_count_without_side_columns(df_clean: pd.DataFrame, df_raw: pd.DataFrame) -> int:
+    """Nulls in the cleaned table, ignoring the '<col>_original' side columns the cleaner ADDS to keep the text of
+    values it could not convert. Those are blank by design, not missing data. Same rule as cleaning.py: the name
+    matches and its base column exists; a column that was already in the user's file is never ignored."""
+    raw_cols = set(df_raw.columns)
+    side = [c for c in df_clean.columns
+            if c not in raw_cols and _SIDE_COLUMN.fullmatch(str(c))
+            and str(c).rsplit("_original", 1)[0] in df_clean.columns]
+    return int(df_clean.drop(columns=side).isnull().sum().sum()) if side else int(df_clean.isnull().sum().sum())
+
+
 def get_cleaning_report(csv_bytes: bytes, filename: str, preview_rows: int = 10) -> dict:
     """
     Runs rule_based_clean() once and returns a before/after report: the
@@ -149,7 +164,7 @@ def get_cleaning_report(csv_bytes: bytes, filename: str, preview_rows: int = 10)
             "after": {
                 "rows": len(df_clean),
                 "columns": len(df_clean.columns),
-                "nullValues": int(df_clean.isnull().sum().sum()),
+                "nullValues": _null_count_without_side_columns(df_clean, df_raw),
             },
             "schema": _schema(df_clean),
             "preview": _records(df_clean.head(preview_rows)),

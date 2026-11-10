@@ -18,7 +18,7 @@ import type {
   AutoAnalyzeResponse,
   DataCheckCard,
 } from "@/lib/pythonClient";
-import { formatNotes } from "@/lib/formatNotes";
+import { formatNoteItems } from "@/lib/formatNotes";
 import { getOrCreateSessionId } from "@/lib/sessionId";
 
 const STEPS = [
@@ -50,6 +50,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [querying, setQuerying] = useState(false);
   const [dataCheckCards, setDataCheckCards] = useState<DataCheckCard[] | null>(null);
+  const [dataCheckColumns, setDataCheckColumns] = useState<Record<string, unknown>[] | null>(null);
 
   // Runs the profile step automatically on upload (it's read-only —
   // nothing about the user's data changes), then STOPS and waits for
@@ -68,6 +69,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAutoAnalyzeReport(null);
       setResult(null);
       setDataCheckCards(null);
+      setDataCheckColumns(null);
       return;
     }
 
@@ -83,6 +85,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAutoAnalyzeReport(null);
       setResult(null);
       setDataCheckCards(null);
+      setDataCheckColumns(null);
 
       try {
         const profileRes = await fetch("/api/profile", {
@@ -121,9 +124,14 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
         });
         const data = await res.json();
         if (cancelled) return;
-        setDataCheckCards(data && data.success === true && Array.isArray(data.cards) ? data.cards : null);
+        const ok = data && data.success === true && Array.isArray(data.cards);
+        setDataCheckCards(ok ? data.cards : null);
+        setDataCheckColumns(ok && Array.isArray(data.columns) ? data.columns : null);
       } catch {
-        if (!cancelled) setDataCheckCards(null);
+        if (!cancelled) {
+          setDataCheckCards(null);
+          setDataCheckColumns(null);
+        }
       }
     })();
     return () => {
@@ -373,7 +381,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
           {result && (
             <ResultDisplay
               result={result}
-              notes={result.success && result.resultType !== "error" ? formatNotes(dataCheckCards, result.code) : []}
+              notes={result.success && result.resultType !== "error" ? formatNoteItems(dataCheckCards, result.code, dataCheckColumns) : []}
             />
           )}
         </>
