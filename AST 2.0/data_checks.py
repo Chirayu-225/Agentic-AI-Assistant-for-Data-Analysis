@@ -180,7 +180,7 @@ def _check_column(name, index: int, series: pd.Series):
     if 100 * top >= DRIFT_MIN_SHARE_PCT * n:
         rec["verdict"] = VERDICT_DRIFT
         minority = ordered[1:]
-        rec["message"] = (f"{col}: {_pct(top, n)} of values use the format {dominant}; {minority_cells} values use "
+        rec["message"] = (f"{col}: {_pct(top, n)} of values use the format {dominant}; {minority_cells} {'value uses' if minority_cells == 1 else 'values use'} "
                           f"another format (e.g. {examples[minority[0][0]]}). These may be legitimate variants.")
         cards = [_card(REASON_DRIFT, name, index, s, c, n, examples[s], rec["message"],
                        dominant_signature=dominant, minority_cells=minority_cells)

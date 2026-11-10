@@ -27,6 +27,8 @@ import io
 import numpy as np
 import pandas as pd
 
+UNREADABLE_FILE_ERROR = "This file could not be read as a table. Check that it is a valid CSV or Excel file."
+
 
 def _friendly_dtype(dtype) -> str:
     """Map a pandas dtype to a short display label matching the
@@ -89,7 +91,8 @@ def get_profile(csv_bytes: bytes, filename: str, preview_rows: int = 10) -> dict
     try:
         df = _read_csv(csv_bytes, filename)
     except Exception as e:
-        return {"success": False, "error": f"Could not parse CSV: {e}"}
+        print(f"[profile-service] could not read file: {type(e).__name__}: {e}", flush=True)
+        return {"success": False, "error": UNREADABLE_FILE_ERROR}
 
     try:
         return {
@@ -125,7 +128,8 @@ def get_cleaning_report(csv_bytes: bytes, filename: str, preview_rows: int = 10)
     try:
         df_raw = _read_csv(csv_bytes, filename)
     except Exception as e:
-        return {"success": False, "error": f"Could not parse CSV: {e}"}
+        print(f"[profile-service] could not read file: {type(e).__name__}: {e}", flush=True)
+        return {"success": False, "error": UNREADABLE_FILE_ERROR}
 
     try:
         from cleaning import rule_based_clean

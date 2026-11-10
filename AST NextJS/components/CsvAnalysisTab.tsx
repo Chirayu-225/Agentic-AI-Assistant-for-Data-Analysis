@@ -268,10 +268,10 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
                 Clean this dataset before analyzing it?
               </p>
               <p className="font-mono text-xs text-muted mb-4">
-                Deterministic, rule-based cleaning: normalizes column names, parses
-                currency/percentages/dates, and fills remaining nulls (numeric columns get
-                the column median, text columns get &apos;Unknown&apos;). This changes the
-                values you&apos;ll be querying — you can skip it and query the raw data instead.
+                Deterministic, rule-based cleaning: normalizes column names and parses
+                currency, percentages and dates. Missing values are left blank, never
+                filled in. This changes the values you&apos;ll be querying — you can skip
+                it and query the raw data instead.
               </p>
               <div className="flex gap-3">
                 <button

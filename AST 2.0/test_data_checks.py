@@ -137,6 +137,14 @@ def main():
                                  "These may be legitimate variants.", cards[0]["message"])
     check("(2) the column record carries the same message", c["message"] == cards[0]["message"])
 
+    # (2b) exactly one value in another format: singular wording, nothing else changes
+    r = check_dataframe(one(drift_values(minority=1, n=1000, first_minority=100), "ref"))
+    cards = cards_for(r, "ref")
+    check("(2b) singular: '1 value uses another format'",
+          len(cards) == 1 and cards[0]["count"] == 1 and cards[0]["message"] ==
+          "ref: 100% of values use the format A-999; 1 value uses another format (e.g. r100). "
+          "These may be legitimate variants.", str(cards))
+
     # (3) free-text names and notes
     notes = [("call back in %d days" % i) if i % 5 == 0 else "left a message" for i in range(300)]
     r = check_dataframe(pd.DataFrame({"name": name_values(300), "notes": notes}))

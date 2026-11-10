@@ -44,6 +44,8 @@ from cleaning import rule_based_clean
 from cache_layer import cached_rule_clean
 from file_reader import read_tabular_file
 
+UNREADABLE_FILE_ERROR = "This file could not be read as a table. Check that it is a valid CSV or Excel file."
+
 
 def _read_csv(csv_bytes: bytes, filename: str) -> pd.DataFrame:
     # Thin wrapper kept so call sites below don't need touching — the
@@ -244,7 +246,8 @@ def run_auto_analyze(csv_bytes: bytes, filename: str, session_id: str) -> dict:
     try:
         df = _read_csv(csv_bytes, filename)
     except Exception as e:
-        return {"success": False, "error": f"Could not parse CSV: {e}"}
+        print(f"[auto-analyze] could not read file: {type(e).__name__}: {e}", flush=True)
+        return {"success": False, "error": UNREADABLE_FILE_ERROR}
 
     try:
         from cleaning import detect_currencies
