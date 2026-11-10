@@ -391,6 +391,18 @@ export interface CleanAgentResponse {
   preview?: Record<string, unknown>[];
   previewCount?: number;
   error?: string;
+  // Set by the backend's verifier, which checks the model's fix against the table it ran on. All optional so an
+  // older response (without them) still type-checks and renders.
+  applied?: boolean; // true if at least one safe change was applied
+  reverted?: string[]; // plain-English summaries, e.g. "state: 1,267 existing values would have been blanked"
+  keptChanges?: AgentKeptChange[];
+  message?: string; // the one-line summary built from the verifier result
+}
+
+export interface AgentKeptChange {
+  column: string;
+  count: number; // cells tidied, or rows for an added column
+  kind: "tidied" | "added";
 }
 
 export function getCleaningReport(req: CleanRequest): Promise<CleanResponse> {

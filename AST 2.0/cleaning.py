@@ -11,8 +11,12 @@ import warnings
 import pandas as pd
 import numpy as np
 
+from missing_tokens import AMBIGUOUS_TOKENS, ambiguous_is_marker, check_policy, kept_note
+
 
 _SENTINELS = {"nan", "none", "null", "n/a", "na", "--", "-", "", "nat"}
+# What stays "always missing" when the NA policy is "safe" and a column's "na" / "none" are real values.
+_UNAMBIGUOUS_SENTINELS = _SENTINELS - AMBIGUOUS_TOKENS
 
 # Currency symbols and codes, as prefix or suffix ("₹1,200", "Rs. 900",
 # "INR 450", "1200 USD").
@@ -258,10 +262,17 @@ def detect_currencies(raw_df: pd.DataFrame) -> dict:
     return found
 
 
-def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) -> tuple[pd.DataFrame, list[str]]:
+def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
+                     na_policy: str = "legacy") -> tuple[pd.DataFrame, list[str]]:
     """
     Apply deterministic cleaning steps in sequence.
     Returns (cleaned_df, log_of_actions).
+
+    na_policy: "legacy" (the default) is the original behaviour, unchanged: the strings "na" / "none" (any case) are
+    sentinel nulls everywhere. "safe" is what the app asks for (cache_layer.cached_rule_clean): they are blanked only
+    in a column where they are a missing-value marker (the other values are numbers or dates), and kept, with a log
+    line, where they are real values such as North America in a TERRITORY column. See missing_tokens.py. The
+    unambiguous sentinels ("N/A", "null", "--", ...) are blanked under both policies.
 
     drop_exact_duplicates: identical rows are KEPT by default and only
     reported. In transaction data, two identical rows are often two real
@@ -271,6 +282,8 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) 
     accidental. Rows that repeat a unique record ID (same invoice_id twice)
     are still merged either way — those are the same record by definition.
     """
+    check_policy(na_policy)
+    safe_na = na_policy == "safe"
     df_c = raw_df.copy()
     log  = []
 
@@ -280,6 +293,24 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) 
     if len(df_c) == 0:
         log.append("⚠ Dataset has no data rows — skipped cleaning steps")
         return df_c, log
+
+    # "safe" NA policy: what the reader already decided (a marker "NA" it blanked) goes first in the log, and the
+    # per-column decision "are 'na' / 'none' markers here, or real values?" is made once per column, lazily.
+    if safe_na:
+        log.extend(raw_df.attrs.get("na_notes", []))
+    _ambiguous_are_markers: dict = {}
+
+    def _tokens_are_markers(col) -> bool:
+        if not safe_na:
+            return True                                   # legacy: "na" / "none" are always sentinels
+        decided = _ambiguous_are_markers.get(col)
+        if decided is None:
+            s = df_c[col]
+            lowered = s[s.notna()].astype(str).str.strip().str.lower()
+            # no ambiguous token in the column: the answer does not matter, and the legacy sentinel set applies
+            decided = (not lowered.isin(AMBIGUOUS_TOKENS).any()) or ambiguous_is_marker(s)
+            _ambiguous_are_markers[col] = decided
+        return decided
 
     # ── 1. Promote row 0 to header if columns look auto-generated ─────────────
     first_row = df_c.iloc[0]
@@ -367,7 +398,8 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) 
         # of the text "nan", so the sentinel check alone no longer excludes it.
         # A blank must not count as a present value, or a column with more than
         # 20% blanks could never reach the 80% parse threshold below.
-        present = df_c[col].notna() & ~series.str.lower().isin(_SENTINELS)
+        sentinels = _SENTINELS if _tokens_are_markers(col) else _UNAMBIGUOUS_SENTINELS
+        present = df_c[col].notna() & ~series.str.lower().isin(sentinels)
         n_present = int(present.sum())
         if n_present == 0:
             continue
@@ -434,7 +466,13 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False) 
     for col in df_c.columns:
         if _is_string_col(df_c[col]):
             lower = df_c[col].str.lower().str.strip()
-            mask  = lower.isin(sentinel_strings)
+            if _tokens_are_markers(col):
+                mask = lower.isin(sentinel_strings)
+            else:
+                mask = lower.isin(sentinel_strings - AMBIGUOUS_TOKENS)
+                tokens = df_c[col][lower.isin(AMBIGUOUS_TOKENS)].str.strip().value_counts()
+                for token in sorted(tokens.index):
+                    log.append(kept_note(col, token, int(tokens[token])))
             if mask.any():
                 df_c.loc[mask, col] = np.nan
                 log.append(f"✓ Replaced {mask.sum()} sentinel string null(s) in '{col}'")

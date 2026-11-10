@@ -189,13 +189,17 @@ def frame_nbytes(df) -> int:
         return int(df.memory_usage(index=True).sum())
 
 
-def cached_parse(file_bytes: bytes, filename: str, parse: Callable[[bytes, str], Any]):
+def cached_parse(file_bytes: bytes, filename: str, parse: Callable[[bytes, str], Any], na_policy: str = "legacy"):
     """Parses `file_bytes` via `parse`, returning a cached COPY when the
     exact same bytes + filename were parsed recently. Used by
-    file_reader.read_tabular_file."""
+    file_reader.read_tabular_file. The NA policy is part of the key, so the
+    same bytes read under two policies are two separate entries; the key of
+    the legacy policy is exactly what it always was."""
     if not enabled():
         return parse(file_bytes, filename)
     key = ("parsed", content_digest(file_bytes), filename.lower().rsplit(".", 1)[-1] if "." in filename else "")
+    if na_policy != "legacy":
+        key += (na_policy,)
     hit = frame_cache.get(key)
     if hit is not None:
         return hit.copy()
@@ -207,18 +211,35 @@ def cached_parse(file_bytes: bytes, filename: str, parse: Callable[[bytes, str],
     return df
 
 
-def cached_rule_clean(df_raw, file_bytes: bytes, clean: Callable[[Any], tuple]):
+def cached_rule_clean(df_raw, file_bytes: bytes, clean: Callable[..., tuple], na_policy: str = "safe"):
     """rule_based_clean() is a pure function of the parsed table, so its
-    output (cleaned frame + log) is cached by the file's content digest.
-    Returns (cleaned_df_copy, log_copy)."""
+    output (cleaned frame + log) is cached by the file's content digest and
+    the NA policy. Returns (cleaned_df_copy, log_copy).
+
+    This is the cleaner half of the app's NA-policy choke point (the reader
+    half is file_reader.read_tabular_file): every app path cleans through
+    here, so the default is the app's policy. A cleaner that does not take an
+    `na_policy` argument (an old caller, a test double) is called as before
+    and cached as legacy. The legacy key is the one it always had."""
+    import inspect
+    if na_policy != "legacy":
+        try:
+            accepts = "na_policy" in inspect.signature(clean).parameters
+        except (TypeError, ValueError):
+            accepts = False
+        if not accepts:
+            na_policy = "legacy"
+    run = (lambda d: clean(d)) if na_policy == "legacy" else (lambda d: clean(d, na_policy=na_policy))
     if not enabled():
-        return clean(df_raw)
+        return run(df_raw)
     key = ("cleaned", content_digest(file_bytes))
+    if na_policy != "legacy":
+        key += (na_policy,)
     hit = frame_cache.get(key)
     if hit is not None:
         df, log = hit
         return df.copy(), list(log)
-    df, log = clean(df_raw)
+    df, log = run(df_raw)
     try:
         frame_cache.put(key, (df.copy(), list(log)), frame_nbytes(df))
     except Exception:

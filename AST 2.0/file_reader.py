@@ -191,15 +191,55 @@ def read_tabular_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
     Errors are never cached.
     """
     import cache_layer
-    return cache_layer.cached_parse(file_bytes, filename, _read_tabular_file_uncached)
+    from missing_tokens import APP_NA_POLICY
+
+    # THE choke point for the app's NA policy: every app read goes through here, so the app asks for "safe" (a real
+    # "NA" such as North America is kept; see missing_tokens.py) in exactly one place. Library code that calls
+    # _read_tabular_file_uncached directly (the scorer, the benchmark, the experiment harness) keeps "legacy".
+    # (A stand-in for the parser that does not know about policies, such as the counting stub in
+    # test_cache_layer.py, is called the way it always was and cached as legacy.)
+    import inspect
+    reader = _read_tabular_file_uncached
+    takes_policy = "na_policy" in inspect.signature(reader).parameters
+
+    def parse(data: bytes, name: str) -> pd.DataFrame:
+        return reader(data, name, na_policy=APP_NA_POLICY) if takes_policy else reader(data, name)
+
+    return cache_layer.cached_parse(file_bytes, filename, parse, na_policy=APP_NA_POLICY if takes_policy else "legacy")
 
 
-def _read_tabular_file_uncached(file_bytes: bytes, filename: str) -> pd.DataFrame:
+def _restore_real_na_tokens(df: pd.DataFrame, file_bytes: bytes, read_kwargs: dict) -> pd.DataFrame:
+    """The "safe" policy's second pass for CSV: put back a real "NA" / "None" that pandas read as missing (see
+    missing_tokens.py for the rule and the fail-closed checks). `read_kwargs` are the kwargs of the first read that
+    worked (today: the encoding), so the second read parses the file the same way."""
+    import missing_tokens
+
+    def reread(columns: list) -> pd.DataFrame:
+        return pd.read_csv(io.BytesIO(file_bytes), usecols=columns, dtype=str, na_filter=False, **read_kwargs)
+
+    result = missing_tokens.restore_ambiguous_tokens(df, reread)
+    if result.fallback_reason:
+        print(f"[file_reader] NA restore skipped ({result.fallback_reason}); using the legacy read.", flush=True)
+        return df
+    out = result.df
+    notes = [missing_tokens.marker_note(col, token, n) for (col, token), n in sorted(result.markers.items())]
+    if notes:
+        out.attrs["na_notes"] = notes
+    return out
+
+
+def _read_tabular_file_uncached(file_bytes: bytes, filename: str, na_policy: str = "legacy") -> pd.DataFrame:
     """Raises ValueError for an unrecognised extension, or whatever
     pandas/openpyxl raises for a file that doesn't parse — callers
     already wrap this in their own try/except and turn it into a
     {"success": False, "error": ...} response, so no extra handling
-    is added here."""
+    is added here.
+
+    na_policy: "legacy" (the default) is the original behaviour, unchanged. "safe" is what the app asks for through
+    read_tabular_file: for CSV/TXT a real "NA" / "None" (such as North America in a TERRITORY column) is put back
+    after pandas turned it into a missing value. Excel is not affected by the policy."""
+    from missing_tokens import check_policy
+    check_policy(na_policy)
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
 
     if ext in ("xlsx", "xls"):
@@ -226,10 +266,15 @@ def _read_tabular_file_uncached(file_bytes: bytes, filename: str) -> pd.DataFram
         raise last_exc  # pragma: no cover
 
     if ext in ("csv", "txt"):
+        read_kwargs: dict = {}
         try:
-            return pd.read_csv(io.BytesIO(file_bytes))
+            df = pd.read_csv(io.BytesIO(file_bytes), **read_kwargs)
         except UnicodeDecodeError:
-            return pd.read_csv(io.BytesIO(file_bytes), encoding="latin1")
+            read_kwargs = {"encoding": "latin1"}
+            df = pd.read_csv(io.BytesIO(file_bytes), **read_kwargs)
+        if na_policy == "safe":
+            df = _restore_real_na_tokens(df, file_bytes, read_kwargs)
+        return df
 
     raise ValueError(
         f"Unsupported file type '.{ext}' — expected one of "

@@ -138,11 +138,11 @@ def _parse_defects(raw: str) -> list[dict]:
 
 _COMPACT_RETRY_NOTE = (
     "\n\nIMPORTANT — your previous answer was too long and was cut off before "
-    "the code block closed. Write SHORT code (under 40 lines): normalise text "
-    "with string methods (.str.strip(), .str.upper()) and map only the specific "
-    "variants named in the defects. Never write one mapping entry per distinct "
-    "value. If a defect can't be fixed compactly, leave that column unchanged "
-    "and say so in REASONING."
+    "the code block closed. Write SHORT code (under 40 lines): tidy text "
+    "with string methods (.str.strip(), .str.upper()) and add boolean flag "
+    "columns, nothing else. Never rename or merge categories and never write "
+    "one mapping entry per distinct value. If a defect can't be fixed compactly, "
+    "leave that column unchanged and say so in REASONING (proposal only: ...)."
 )
 
 
@@ -157,6 +157,35 @@ def _parse_fix_response(raw: str) -> tuple[list[str], str]:
         if line.strip().startswith("-")
     ]
     return reasoning_lines, code
+
+
+_NOTHING_APPLIED = {"applied": False, "reverted": [], "keptChanges": []}
+
+
+def _verified_table(df_before: pd.DataFrame, df_fix: pd.DataFrame):
+    """Run the fix script's output through agent_verify, in the backend, on the table we already hold. Returns
+    (table to use, extra response fields). Any structural failure, verifier fault or verifier crash keeps the table
+    exactly as it was. Nothing from an exception reaches the response; the detail goes to the server log."""
+    import agent_verify
+    try:
+        result = agent_verify.verify_fix(df_before, df_fix)
+    except Exception:
+        import traceback
+        _log_detail("verifier crashed; the fix was discarded", traceback.format_exc())
+        result = {"ok": False, "structural": False, "fault": True, "violations": [], "reverted_columns": [],
+                  "kept_changes": [], "new_columns": [], "repaired": df_before}
+    for v in result["violations"]:
+        _log_detail("fix violation", v)
+    if not result["ok"]:
+        return df_before, {**_NOTHING_APPLIED, "reverted": [agent_verify.describe_violation(v) for v in result["violations"]
+                                                            if v["kind"] != "structure"],
+                           "message": agent_verify.build_message(result)}
+    return result["repaired"], {
+        "applied": bool(result["kept_changes"]),
+        "reverted": [agent_verify.describe_violation(v) for v in result["violations"]],
+        "keptChanges": result["kept_changes"],
+        "message": agent_verify.build_message(result),
+    }
 
 
 def run_cleaning_agent(
@@ -229,6 +258,8 @@ def run_cleaning_agent(
                 },
                 "preview": _records(df_rule_cleaned.head(preview_rows)),
                 "previewCount": min(preview_rows, len(df_rule_cleaned)),
+                **_NOTHING_APPLIED,
+                "message": "No data was changed. No defects were found.",
             }
 
         schema_text = ", ".join(df_rule_cleaned.columns.tolist())
@@ -280,6 +311,10 @@ def run_cleaning_agent(
                 "reasoning": reasoning_lines,
             }
 
+        # The model's table is NOT trusted. What it may keep is decided here, from the two tables themselves: values it
+        # blanked, filled or changed are reverted, structural damage discards the fix. The result is the working table.
+        df_used, verdict = _verified_table(df_rule_cleaned, df_final)
+
         return {
             "success": True,
             "filename": filename,
@@ -289,12 +324,13 @@ def run_cleaning_agent(
             "reasoning": reasoning_lines,
             "before": before,
             "after": {
-                "rows": len(df_final),
-                "columns": len(df_final.columns),
-                "nullValues": int(df_final.isnull().sum().sum()),
+                "rows": len(df_used),
+                "columns": len(df_used.columns),
+                "nullValues": int(df_used.isnull().sum().sum()),
             },
-            "preview": _records(df_final.head(preview_rows)),
-            "previewCount": min(preview_rows, len(df_final)),
+            "preview": _records(df_used.head(preview_rows)),
+            "previewCount": min(preview_rows, len(df_used)),
+            **verdict,
         }
     except Exception:
         import traceback

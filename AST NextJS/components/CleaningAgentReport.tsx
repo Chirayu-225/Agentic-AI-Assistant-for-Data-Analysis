@@ -44,6 +44,7 @@ function DefectCard({ defect }: { defect: DataQualityDefect }) {
           {DEFECT_TYPE_LABELS[defect.type] ?? defect.type.toUpperCase()}
         </span>
         <span className="font-mono text-xs text-text">{defect.column}</span>
+        <span className="font-mono text-[10px] text-muted ml-auto">model-suggested, unverified</span>
       </div>
       <p className="text-[#818CF8] text-xs mb-1">{defect.evidence}</p>
       <p className="font-mono text-xs text-[#FBBF24]">→ {defect.action}</p>
@@ -87,12 +88,34 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
   }
 
   const { before, after, reasoning } = report;
+  const reverted = report.reverted ?? [];
+  // Green: safe changes were applied and nothing was reverted. Amber: nothing was changed, or something was reverted.
+  const bannerIsGreen = report.applied === true && reverted.length === 0;
 
   return (
     <div className="border border-accent/40 rounded-lg bg-panel p-5 mb-6">
       <p className="font-mono text-xs text-accent tracking-widest mb-4">
         // DATA QUALITY AGENT REPORT — {report.filename}
       </p>
+
+      {report.message && (
+        <div
+          className={`rounded-lg border px-4 py-3 mb-5 ${
+            bannerIsGreen
+              ? "border-accent/40 bg-accent/10 text-accent"
+              : "border-[#FBBF24]/40 bg-[#FBBF24]/10 text-[#FBBF24]"
+          }`}
+        >
+          <p className="text-sm">{report.message}</p>
+          {reverted.length > 0 && (
+            <ul className="mt-2 list-disc pl-5 font-mono text-xs space-y-0.5">
+              {reverted.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {before && after && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
@@ -119,11 +142,24 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
 
       <p className="font-mono text-[11px] text-muted tracking-widest mb-2">AGENT FIX REASONING</p>
       <div className="flex flex-col gap-2 font-mono text-xs">
-        {(reasoning ?? []).map((line: string, i: number) => (
-          <p key={i} className="text-text border-b border-border/50 pb-2">
-            {line.replace(/^-\s*/, "")}
-          </p>
-        ))}
+        {(reasoning ?? []).map((line: string, i: number) => {
+          const text = line.replace(/^-\s*/, "");
+          // "proposal only" lines are display text: something a person should decide. They are never executed.
+          const isProposal = /proposal only\s*:/i.test(text);
+          return (
+            <p
+              key={i}
+              className={`border-b border-border/50 pb-2 ${isProposal ? "text-muted italic" : "text-text"}`}
+            >
+              {isProposal && (
+                <span className="not-italic text-[10px] tracking-widest mr-2 px-1.5 py-0.5 rounded bg-border/40">
+                  PROPOSAL ONLY
+                </span>
+              )}
+              {text}
+            </p>
+          );
+        })}
       </div>
     </div>
   );

@@ -483,11 +483,27 @@ def build_defect_fix_prompt(defects: list[dict], schema_text: str) -> str:
     lines = [
         "You are fixing the following data quality defects on `df` (a "
         "pandas DataFrame that's already been through deterministic "
-        "rule-based cleaning). For EACH defect, apply the most sensible "
-        "fix given standard data-cleaning practice — e.g. for "
-        "inconsistent categories, map every variant to one canonical "
-        "spelling; for a meaningful missing value, use an honest label "
-        "like 'Not Applicable' rather than forcing a numeric guess.",
+        "rule-based cleaning). The user's data is the source of truth: "
+        "you may tidy how a value is WRITTEN, but you may never change "
+        "WHAT it says. Your code is checked afterwards and any column "
+        "that breaks these rules is put back exactly as it was.",
+        "",
+        "HARD RULES:",
+        "- NEVER replace an existing value with NaN or None.",
+        "- NEVER fill missing values (no 'Unknown', no 0, no mean/median, "
+        "no ffill/bfill/interpolate).",
+        "- NEVER rename or merge categories (do not turn 'Planes' into "
+        "'Aircraft', and do not map several spellings onto one).",
+        "- NEVER drop rows or columns.",
+        "- NEVER reorder or rename rows or columns, and never change the "
+        "index.",
+        "- ONLY add new boolean flag columns (for example sales_is_outlier), "
+        "strip whitespace, normalize case in low-cardinality text columns, "
+        "or parse text to numbers or dates when EVERY value parses.",
+        "- Anything else — merging spelling variants, imputing, correcting "
+        "an outlier, deciding what a blank means — is a human's decision. "
+        "Leave that data unchanged and, on that defect's REASONING line, "
+        "write: proposal only: <what a human should decide>.",
         "",
         f"Columns available: {schema_text}",
         "",
@@ -502,17 +518,17 @@ def build_defect_fix_prompt(defects: list[dict], schema_text: str) -> str:
         "to `cleaned_df`:\n\n"
         "REASONING:\n"
         "- <defect>: <what you did> — <why>\n"
-        "(one line per defect, nothing else in this section)\n\n"
+        "- <defect>: proposal only: <what a human should decide>\n"
+        "(one line per defect, nothing else in this section; a "
+        "'proposal only' line is shown to the user and never run)\n\n"
         "```python\n"
         "cleaned_df = df.copy()\n"
         "# ... your fixes here, one defect at a time ...\n"
         "```\n\n"
         "Rules: only use pandas/numpy operations already available as "
         "df/pd/np. No imports. No print(). Only touch columns relevant "
-        "to the defects listed above. Keep the code SHORT (under 40 lines): "
-        "for a column with many variants, normalise with string methods and "
-        "map only the variants named in the defect — never write one mapping "
-        "entry per distinct value. Don't drop columns or rows; if a column is "
+        "to the defects listed above. Keep the code SHORT (under 40 lines) "
+        "and never write one mapping entry per distinct value. If a column is "
         "mostly empty, leave it as-is and note that in REASONING. "
         "Iterating a DataFrame (`for c in df.columns`) gives column NAMES "
         "(plain strings), so use df[c] to get the column; select text columns "
