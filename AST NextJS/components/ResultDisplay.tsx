@@ -44,7 +44,7 @@ export function themeTraces(traces: any[]): any[] {
   });
 }
 
-export default function ResultDisplay({ result }: { result: AnalyzeResponse }) {
+export default function ResultDisplay({ result, notes }: { result: AnalyzeResponse; notes?: string[] }) {
   if (!result.success || result.resultType === "error") {
     return (
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4">
@@ -88,6 +88,14 @@ export default function ResultDisplay({ result }: { result: AnalyzeResponse }) {
           style={{ width: "100%" }}
           config={{ displayModeBar: false }}
         />
+      )}
+
+      {notes && notes.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {notes.map((note, i) => (
+            <p key={i} className="text-xs text-muted">{note}</p>
+          ))}
+        </div>
       )}
 
       <ShowWork code={result.code} language={result.method === "generated_sql" ? "sql" : "python"} />

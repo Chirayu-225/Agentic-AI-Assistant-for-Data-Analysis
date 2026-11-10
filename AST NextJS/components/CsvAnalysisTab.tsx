@@ -16,7 +16,9 @@ import type {
   CleanResponse,
   CleanAgentResponse,
   AutoAnalyzeResponse,
+  DataCheckCard,
 } from "@/lib/pythonClient";
+import { formatNotes } from "@/lib/formatNotes";
 import { getOrCreateSessionId } from "@/lib/sessionId";
 
 const STEPS = [
@@ -47,6 +49,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
   const [autoAnalyzeReport, setAutoAnalyzeReport] = useState<AutoAnalyzeResponse | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [querying, setQuerying] = useState(false);
+  const [dataCheckCards, setDataCheckCards] = useState<DataCheckCard[] | null>(null);
 
   // Runs the profile step automatically on upload (it's read-only —
   // nothing about the user's data changes), then STOPS and waits for
@@ -64,6 +67,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
+      setDataCheckCards(null);
       return;
     }
 
@@ -78,6 +82,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
+      setDataCheckCards(null);
 
       try {
         const profileRes = await fetch("/api/profile", {
@@ -101,6 +106,30 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       cancelled = true;
     };
   }, [file]);
+
+  // One non-blocking fetch of the data-check cards when the pipeline reaches
+  // "ready". Purely advisory: any failure just means no note is shown.
+  useEffect(() => {
+    if (!file || stage !== "ready") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/data-checks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileUrl: file.url, filename: file.filename }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        setDataCheckCards(data && data.success === true && Array.isArray(data.cards) ? data.cards : null);
+      } catch {
+        if (!cancelled) setDataCheckCards(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, file]);
 
   async function handleConfirmClean() {
     if (!file) return;
@@ -341,7 +370,12 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
             </p>
           )}
 
-          {result && <ResultDisplay result={result} />}
+          {result && (
+            <ResultDisplay
+              result={result}
+              notes={result.success && result.resultType !== "error" ? formatNotes(dataCheckCards, result.code) : []}
+            />
+          )}
         </>
       )}
     </div>

@@ -429,6 +429,51 @@ def clean(req: CleanRequest, x_service_secret: str = Header(default="")):
         return {"success": False, "error": f"Unexpected server error: {e}"}
 
 
+DATA_CHECKS_ERROR = "Data checks are unavailable for this file."
+
+
+def _data_checks_payload(content: bytes, filename: str) -> dict:
+    """Parse and clean exactly as /clean does (same reader, same cached cleaned
+    table), then run the deterministic checks. Raises on any failure; the route
+    turns that into a fixed message so no exception text reaches the client."""
+    from file_reader import read_tabular_file
+    from cleaning import rule_based_clean
+    import data_checks
+
+    df_raw = read_tabular_file(content, filename)
+    df_clean, _log = cache_layer.cached_rule_clean(df_raw, content, rule_based_clean)
+    result = data_checks.check_dataframe(df_clean)
+    return {
+        "success": True,
+        "filename": filename,
+        "nRows": result["n_rows"],
+        "cards": result["cards"],
+        "columns": result["columns"],
+    }
+
+
+def _data_checks_response(content: bytes, filename: str) -> dict:
+    try:
+        return cache_layer.cached_result(
+            "data-checks", content, lambda: _data_checks_payload(content, filename), extra=filename)
+    except Exception as e:
+        # Detail stays server-side only; the client gets a fixed message.
+        print(f"[api] data-checks failed: {type(e).__name__}: {e}", flush=True)
+        return {"success": False, "error": DATA_CHECKS_ERROR}
+
+
+@app.post("/data-checks")
+def data_checks_route(req: CleanRequest, x_service_secret: str = Header(default="")):
+    _check_secret(x_service_secret)
+    _limit("light", "file:" + audit_log.sha_short(req.fileUrl), filename=req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    return _data_checks_response(content, req.filename)
+
+
 @app.post("/clean/agent")
 def clean_agent(req: CleanAgentRequest, x_service_secret: str = Header(default="")):
     # Separate, explicitly user-triggered endpoint — see cleaning_agent.py's

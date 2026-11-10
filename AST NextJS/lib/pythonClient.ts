@@ -188,6 +188,27 @@ export interface CleanResponse {
   error?: string;
 }
 
+export interface DataCheckCard {
+  reason: "format_drift" | "format_variance" | "encoding_artifact";
+  column: string | number;
+  column_index: number;
+  signature: string | null;
+  count: number;
+  of: number;
+  example: string;
+  message: string;
+  kinds?: string[];
+}
+
+export interface DataChecksResponse {
+  success: boolean;
+  filename?: string;
+  nRows?: number;
+  cards?: DataCheckCard[];
+  columns?: Record<string, unknown>[];
+  error?: string;
+}
+
 export class RateLimitedError extends Error {
   retryAfterSeconds: number;
   constructor(retryAfterSeconds: number) {
@@ -376,6 +397,10 @@ export function getCleaningReport(req: CleanRequest): Promise<CleanResponse> {
   // Same read_tabular_file() cost as /profile, same reasoning — see
   // FILE_READ_TIMEOUT_MS's comment above.
   return callPythonService<CleanResponse>("/clean", req, FILE_READ_TIMEOUT_MS);
+}
+
+export function getDataChecks(req: CleanRequest): Promise<DataChecksResponse> {
+  return callPythonService<DataChecksResponse>("/data-checks", req, FILE_READ_TIMEOUT_MS);
 }
 
 // LIVE BUG: a 5-sheet, 18MB workbook (hotel_revenue_historical_full-2.xlsx,
