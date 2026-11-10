@@ -28,24 +28,30 @@ def stub(responses):
     query_engine.llm_with_fallback = fake
     return prompts
 
-prompts = stub(["result = df.points.sum()", "result = int(df[df['team'] == 'a']['pts'].sum())"])
-r = run_analysis_from_cleaned_df(DF, Q, "t")
-check("repaired code answers correctly", r.get("success") and r.get("resultData") == 8, str(r)[:200])
-check("response says it was retried", r.get("retried") is True)
-check("repair prompt includes the failing code and its error",
-      len(prompts) == 2 and "df.points.sum()" in prompts[1] and "Error:" in prompts[1])
-check("the code shown to the user is the code that actually ran", "df['team'] == 'a'" in r.get("code", ""))
 
-prompts = stub(["result = df.nope.sum()", "result = df.still_nope.sum()"])
-r = run_analysis_from_cleaned_df(DF, Q, "t2")
-check("two failures give a clean error, not a crash", r.get("success") is False and "first attempt" in (r.get("error") or ""), str(r)[:200])
+def main():
+    prompts = stub(["result = df.points.sum()", "result = int(df[df['team'] == 'a']['pts'].sum())"])
+    r = run_analysis_from_cleaned_df(DF, Q, "t")
+    check("repaired code answers correctly", r.get("success") and r.get("resultData") == 8, str(r)[:200])
+    check("response says it was retried", r.get("retried") is True)
+    check("repair prompt includes the failing code and its error",
+          len(prompts) == 2 and "df.points.sum()" in prompts[1] and "Error:" in prompts[1])
+    check("the code shown to the user is the code that actually ran", "df['team'] == 'a'" in r.get("code", ""))
 
-prompts = stub(["result = int(df['pts'].sum())"])
-r = run_analysis_from_cleaned_df(DF, Q, "t3")
-check("a first-time success makes exactly one LLM call", r.get("success") and len(prompts) == 1 and r.get("retried") is False)
+    prompts = stub(["result = df.nope.sum()", "result = df.still_nope.sum()"])
+    r = run_analysis_from_cleaned_df(DF, Q, "t2")
+    check("two failures give a clean error, not a crash", r.get("success") is False and "first attempt" in (r.get("error") or ""), str(r)[:200])
 
-print()
-if FAIL:
-    print(f"DONE — {len(FAIL)} FAILURE(S): {FAIL}")
-    sys.exit(1)
-print("DONE — all checks passed.")
+    prompts = stub(["result = int(df['pts'].sum())"])
+    r = run_analysis_from_cleaned_df(DF, Q, "t3")
+    check("a first-time success makes exactly one LLM call", r.get("success") and len(prompts) == 1 and r.get("retried") is False)
+
+    print()
+    if FAIL:
+        print(f"DONE — {len(FAIL)} FAILURE(S): {FAIL}")
+        sys.exit(1)
+    print("DONE — all checks passed.")
+
+
+if __name__ == "__main__":
+    main()

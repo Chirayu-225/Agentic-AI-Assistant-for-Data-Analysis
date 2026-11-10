@@ -77,6 +77,23 @@ def _records(df: pd.DataFrame) -> list[dict]:
     return [{k: _json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
 
 
+# What the USER sees when something goes wrong. Fixed strings on purpose: never
+# put exception text, tracebacks or file paths in a response (they leak
+# internals and mean nothing to the user). The technical detail goes to the
+# server log through _log_detail instead.
+_SAFE_READ_ERROR = ("This file could not be read as a table. Check that it is a valid "
+                    "CSV or Excel file.")
+_SAFE_FIX_ERROR = ("The AI's suggested fix could not be applied. Nothing in your data "
+                   "was changed.")
+_SAFE_AGENT_ERROR = ("The data quality check could not be completed. Nothing in your "
+                     "data was changed.")
+
+
+def _log_detail(what: str, detail) -> None:
+    """Technical detail for the server log only (never returned to the user)."""
+    print(f"[cleaning-agent] {what}: {detail}", flush=True)
+
+
 def _read_csv(csv_bytes: bytes, filename: str) -> pd.DataFrame:
     from file_reader import read_tabular_file
     return read_tabular_file(csv_bytes, filename)
@@ -162,7 +179,8 @@ def run_cleaning_agent(
     try:
         df_raw = _read_csv(csv_bytes, filename)
     except Exception as e:
-        return {"success": False, "error": f"Could not parse CSV: {e}"}
+        _log_detail(f"could not read {filename!r}", repr(e))
+        return {"success": False, "error": _SAFE_READ_ERROR}
 
     try:
         from cleaning import rule_based_clean
@@ -243,9 +261,10 @@ def run_cleaning_agent(
         sbr = run_sandboxed(code, df_rule_cleaned, include_charts=False, timeout_seconds=20)
 
         if not sbr.success or not sbr.produced:
+            _log_detail("fix code failed to execute", f"{sbr.error}\n--- fix code was:\n{code}")
             return {
                 "success": False,
-                "error": f"Agent's fix code failed to execute: {sbr.error}",
+                "error": _SAFE_FIX_ERROR,
                 "ruleLog": rule_log,
                 "defects": defects,
                 "reasoning": reasoning_lines,
@@ -277,5 +296,7 @@ def run_cleaning_agent(
             "preview": _records(df_final.head(preview_rows)),
             "previewCount": min(preview_rows, len(df_final)),
         }
-    except Exception as e:
-        return {"success": False, "error": f"Data quality agent failed: {e}"}
+    except Exception:
+        import traceback
+        _log_detail("agent failed", traceback.format_exc())
+        return {"success": False, "error": _SAFE_AGENT_ERROR}
