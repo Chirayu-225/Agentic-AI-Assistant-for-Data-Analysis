@@ -48,6 +48,7 @@ from cleaning_agent import run_cleaning_agent
 from auto_analyze_service import run_auto_analyze, answer_followup
 from multi_table_service import run_multi_table_query
 import session_cache
+from error_scrub import scrub_result
 import audit_log
 import cache_layer
 import rate_limiter
@@ -330,7 +331,8 @@ async def upload(request: Request, x_service_secret: str = Header(default=""),
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     except Exception as e:
         writer.abort()
-        return JSONResponse({"success": False, "error": f"Upload failed: {e}"}, status_code=500)
+        # An OSError text can carry a disk path: fixed message + reference id, the trace stays in the server log.
+        return JSONResponse(_server_error(e), status_code=500)
 
     audit_log.record("upload", bytes=writer.size, upload_id=url[-8:])
     return {"success": True, "url": url, "bytes": writer.size}
@@ -365,7 +367,7 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
     cached = session_cache.get(req.sessionId, req.fileUrl)
     if cached is not None:
         try:
-            return run_analysis_from_cleaned_df(cached.cleaned_df, req.query, req.sessionId)
+            return scrub_result(run_analysis_from_cleaned_df(cached.cleaned_df, req.query, req.sessionId))
         except Exception as e:
             return _server_error(e, resultType="error", resultData=None)
 
@@ -374,7 +376,7 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
         return {**err, "resultType": "error", "resultData": None}
 
     try:
-        return run_analysis(content, req.filename, req.query, req.sessionId, file_url=req.fileUrl)
+        return scrub_result(run_analysis(content, req.filename, req.query, req.sessionId, file_url=req.fileUrl))
     except Exception as e:
         # Last-resort catch-all — analysis_service.py has its own internal
         # guards, but a public endpoint should never return a raw 500
@@ -393,7 +395,7 @@ def rag_index(req: RagIndexRequest, x_service_secret: str = Header(default="")):
         return err
 
     try:
-        return index_document(content, req.filename, req.sessionId)
+        return scrub_result(index_document(content, req.filename, req.sessionId))
     except Exception as e:
         return _server_error(e)
 
@@ -404,7 +406,7 @@ def rag_query(req: RagQueryRequest, x_service_secret: str = Header(default="")):
     _limit("medium", req.docId, filename=req.filename)
 
     try:
-        return answer_question(req.docId, req.query, req.filename)
+        return scrub_result(answer_question(req.docId, req.query, req.filename))
     except Exception as e:
         return _server_error(e)
 
@@ -415,7 +417,7 @@ def rag_insights(req: RagInsightsRequest, x_service_secret: str = Header(default
     _limit("medium", req.docId, filename=req.filename)
 
     try:
-        return get_insights(req.docId, req.filename)
+        return scrub_result(get_insights(req.docId, req.filename))
     except Exception as e:
         return _server_error(e)
 
@@ -430,8 +432,8 @@ def profile(req: ProfileRequest, x_service_secret: str = Header(default="")):
         return err
 
     try:
-        return cache_layer.cached_result(
-            "profile", content, lambda: get_profile(content, req.filename), extra=req.filename)
+        return scrub_result(cache_layer.cached_result(
+            "profile", content, lambda: get_profile(content, req.filename), extra=req.filename))
     except Exception as e:
         return _server_error(e)
 
@@ -446,8 +448,8 @@ def clean(req: CleanRequest, x_service_secret: str = Header(default="")):
         return err
 
     try:
-        return cache_layer.cached_result(
-            "clean", content, lambda: get_cleaning_report(content, req.filename), extra=req.filename)
+        return scrub_result(cache_layer.cached_result(
+            "clean", content, lambda: get_cleaning_report(content, req.filename), extra=req.filename))
     except Exception as e:
         return _server_error(e)
 
@@ -494,7 +496,7 @@ def data_checks_route(req: CleanRequest, x_service_secret: str = Header(default=
     if err is not None:
         return err
 
-    return _data_checks_response(content, req.filename)
+    return scrub_result(_data_checks_response(content, req.filename))
 
 
 @app.post("/clean/agent")
@@ -509,7 +511,7 @@ def clean_agent(req: CleanAgentRequest, x_service_secret: str = Header(default="
         return err
 
     try:
-        return run_cleaning_agent(content, req.filename, req.sessionId)
+        return scrub_result(run_cleaning_agent(content, req.filename, req.sessionId))
     except Exception as e:
         return _server_error(e)
 
@@ -527,7 +529,7 @@ def auto_analyze(req: AutoAnalyzeRequest, x_service_secret: str = Header(default
         return err
 
     try:
-        return run_auto_analyze(content, req.filename, req.sessionId)
+        return scrub_result(run_auto_analyze(content, req.filename, req.sessionId))
     except Exception as e:
         return _server_error(e)
 
@@ -542,13 +544,13 @@ def auto_analyze_followup(req: FollowUpRequest, x_service_secret: str = Header(d
         return err
 
     try:
-        return answer_followup(
+        return scrub_result(answer_followup(
             content, req.filename,
             [i.model_dump() for i in req.insights],
             req.question,
             [qa.model_dump() for qa in req.priorQa],
             req.sessionId,
-        )
+        ))
     except Exception as e:
         return _server_error(e)
 
@@ -569,7 +571,7 @@ def multi_table_query(req: MultiTableQueryRequest, x_service_secret: str = Heade
         datasets.append({"alias": ds.alias, "csv_bytes": content, "filename": ds.filename})
 
     try:
-        return run_multi_table_query(datasets, req.query, req.sessionId)
+        return scrub_result(run_multi_table_query(datasets, req.query, req.sessionId))
     except Exception as e:
         return _server_error(e)
 
