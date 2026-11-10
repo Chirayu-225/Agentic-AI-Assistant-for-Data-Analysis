@@ -1,0 +1,51 @@
+   validity: 386 stamped cell(s), 68 unstamped; system versions ['e79fd1034d2f408f'], models ['openai/gpt-oss-20b'], temperatures [0.1]
+
+1. tokens per call: 1197  (437 calls over 463 runs = 0.94 calls/run, 1130 tokens/run)
+   runs: 463  {'correct': 313, 'wrong': 117, 'crash': 12, 'infra_error': 9, 'no_answer': 11, 'error': 1}  (infra errors are excluded from every rate and listed per cell)
+
+2. per defect type (cells are correct/n questions; silent = wrong answers with no note; crash = the file could not be read)
+   defect (tag)kind       tier       n  | clean   ok  silent  crash  infra  | dirty   ok  silent  crash  infra  | stage0  ok  silent  crash  infra  
+   footer      structural single     2  |          2/2     0      0      0  |          1/2     1      0      0  |          2/2     0      0      0  
+   total       structural single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   header      structural single     2  |          2/2     0      0      0  |          0/2     0      2      0  |          2/2     0      0      0  
+   ragged      structural single     2  |          2/2     0      0      0  |          0/2     0      2      0  |          0/2     2      0      0  
+   bomtrail    structural single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   dupexact    value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   dupnear     value      single     2  |          2/2     0      0      0  |          0/2     2      0      0  |          0/2     2      0      0  
+   sentinel    value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   numtext     value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   outlier     value      single     2  |          2/2     0      0      0  |          0/2     2      0      0  |          0/2     2      0      0  
+   impossible  value      single     2  |          2/2     0      0      0  |          0/2     2      0      0  |          0/2     2      0      0  
+   future      value      single     2  |          2/2     0      0      1  |          1/2     1      0      3  |          1/2     1      0      2  
+   datemix     value      single     2  |          2/2     0      0      0  |          0/2     2      0      0  |          0/2     2      0      0  
+   catvar      value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   whitespace  value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   swap        value      single     2  |          2/2     0      0      2  |          0/2     2      0      1  |          0/2     2      0      0  
+   unit        value      single     2  |          2/2     0      0      0  |          0/2     1      0      0  |          0/2     1      0      0  
+   pct         value      single     1  |          0/1     1      0      0  |          0/1     1      0      0  |          0/1     1      0      0  
+   zeros       value      single     1  |          1/1     0      0      0  |          1/1     0      0      0  |          1/1     0      0      0  
+   endstart    value      single     2  |          2/2     0      0      0  |          1/2     1      0      0  |          1/2     1      0      0  
+   orphan      value      single     2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   c1          value      compound   2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   c2          value      compound   2  |          2/2     0      0      0  |          2/2     0      0      0  |          2/2     0      0      0  
+   c3          value      compound   2  |          2/2     0      0      0  |          0/2     2      0      0  |          0/2     2      0      0  
+   c4          value      compound   2  |          2/2     0      0      0  |          1/2     1      0      0  |          1/2     1      0      0  
+   c5          value      compound   2  |          2/2     0      0      0  |          0/2     1      0      0  |          1/2     0      0      0  
+   answered WITHOUT the model (the app's rule-based shortcut) in at least one arm: outlier-2, unit-2
+
+3. questions the CLEAN arm itself got wrong or could not answer (is the question set or the model the weak link?)
+   pct-1       expected 14.850250     got '0.148502'    What is the average discount percentage across all orders?
+
+4. headroom, conditioned on questions the clean arm got right (value-level questions)
+   single tier    48 points over 29 questions, 95% interval [31, 66]
+   compound tier  50 points over 10 questions, 95% interval [20, 80]
+   structural  accuracy clean 100%  dirty 50%  stage0 80%  (n=10)  gap closed by stage0: 60%
+   value       accuracy clean 98%  dirty 50%  stage0 52%  (n=40)  gap closed by stage0: 5%
+
+5. Stage 0 vs dirty
+   structural (stage0 ok / dirty ok / n): bomtrail 2/2/2, footer 2/1/2, header 2/0/2, ragged 0/0/2, total 2/2/2
+   new crashes: none   non-structural questions net worse: -1
+
+DECISION (pre-registered rules, full run)
+   validators: BUILD the validators (rank by per-type headroom)
+   stage 0:    WIRE Stage 0 in (and retire the old reader's CSV path)
