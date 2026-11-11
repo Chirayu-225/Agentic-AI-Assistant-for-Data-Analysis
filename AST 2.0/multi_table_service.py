@@ -57,6 +57,7 @@ import pandas as pd
 
 from cleaning import rule_based_clean
 from file_reader import read_tabular_file, should_use_large_csv_path, MAX_RESULT_ROWS
+import file_reader as _file_reader
 
 
 def _json_safe(value):
@@ -408,9 +409,9 @@ def _run_multi_table_query(datasets: list[dict], query: str, session_id: str, in
                     # the real query still runs against the whole file,
                     # via file_tables below, never this sample.
                     try:
-                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20)
+                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, sep=_file_reader.detect_delimiter(csv_bytes))
                     except UnicodeDecodeError:
-                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, encoding="latin1")
+                        sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, encoding="latin1", sep=_file_reader.detect_delimiter(csv_bytes))
                 except Exception as e:
                     return {"success": False, "error": f"Could not read '{filename}': {e}"}
 

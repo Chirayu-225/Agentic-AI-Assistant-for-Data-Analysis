@@ -22,7 +22,18 @@ const MAX_FAILS = 10;
 const failures = new Map<string, { count: number; first: number }>();
 
 function clientIp(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  // The caller controls the FIRST X-Forwarded-For entry, so trusting it lets anyone reset the
+  // lockout below by sending a fresh fake address per guess. x-vercel-forwarded-for / x-real-ip
+  // are only trustworthy on Vercel, which overwrites them at its edge; on any other host a
+  // caller could send them freely, so they are ignored unless VERCEL is set. Everywhere else
+  // use the LAST x-forwarded-for hop, which is appended by the nearest proxy.
+  const h = request.headers;
+  if (process.env.VERCEL) {
+    const platform = h.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip")?.trim();
+    if (platform) return platform;
+  }
+  const hops = (h.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return hops[hops.length - 1] || "unknown";
 }
 
 export async function POST(request: NextRequest) {

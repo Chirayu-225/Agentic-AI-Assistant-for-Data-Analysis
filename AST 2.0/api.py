@@ -34,7 +34,11 @@ import traceback
 import uuid
 
 from dotenv import load_dotenv
-load_dotenv(override=True)  # .env always wins over a stale shell variable (e.g. an old `set PYTHON_SERVICE_SECRET=...`); reads .env in this folder — see .env.example for what's needed
+# Local dev: .env wins over a stale shell variable (e.g. an old `set PYTHON_SERVICE_SECRET=...`).
+# Hosted (Render sets RENDER, or set APP_ENV=production): the platform's real environment variables
+# win, so a stray .env file can never silently override production secrets. See .env.example.
+_HOSTED = bool(os.environ.get("RENDER")) or os.environ.get("APP_ENV", "").lower() == "production"
+load_dotenv(override=not _HOSTED)
 
 import requests
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -45,6 +49,8 @@ from analysis_service import run_analysis, run_analysis_from_cleaned_df
 from rag_service import index_document, answer_question, get_insights
 from profile_service import get_profile, get_cleaning_report
 from cleaning_agent import run_cleaning_agent
+from fill_service import run_fill
+import audit_service
 from auto_analyze_service import run_auto_analyze, answer_followup
 from multi_table_service import run_multi_table_query
 import session_cache
@@ -53,6 +59,7 @@ import audit_log
 import cache_layer
 import rate_limiter
 import local_store
+import data_connectors
 from llm_provider import usage_stats as llm_usage_stats
 
 SERVICE_SECRET = os.environ.get("PYTHON_SERVICE_SECRET", "")
@@ -93,11 +100,18 @@ if not _SANDBOX_HAS_MEMORY_CAP:
     )
 
 
+# How many reverse proxies of OURS sit in front of this service. Defaults to 1 when hosted
+# (Render) and 0 locally, where nothing in front of us can be trusted and a client-sent
+# X-Forwarded-For must be ignored. Override with TRUSTED_PROXY_HOPS.
+# Each trusted proxy APPENDS the address it saw to X-Forwarded-For, so only the right-most
+# entries are trustworthy. The first entry is whatever the caller chose to send.
+TRUSTED_PROXY_HOPS = max(int(os.environ.get("TRUSTED_PROXY_HOPS") or (1 if _HOSTED else 0)), 0)
+
+
 def _client_ip(request: Request) -> str:
-    # Behind a proxy (Render) the real caller is the first X-Forwarded-For hop.
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    if parts and TRUSTED_PROXY_HOPS:
+        return parts[max(len(parts) - TRUSTED_PROXY_HOPS, 0)]  # count from the right, never the left
     return request.client.host if request.client else "unknown"
 
 
@@ -200,6 +214,23 @@ class CleanAgentRequest(BaseModel):
     sessionId: str
 
 
+class FillRequest(CleanAgentRequest):
+    # also label the text blanks nothing in the file can fill with "Unknown" (a separate, explicit click)
+    unknown: bool = False
+    unknownColumns: list[str] = []      # label just these columns' text blanks "Unknown" (the user's per-column answer)
+
+
+class AuditRequest(CleanAgentRequest):
+    scope: str = "clean"                # "agent" once the agent has run: the audit then covers its steps too
+    offset: int = 0
+    limit: int = 100
+    rule: str | None = None
+    column: str | None = None
+    action: str | None = None
+    q: str | None = None
+    refresh: bool = False
+
+
 class AutoAnalyzeRequest(BaseModel):
     fileUrl: str
     filename: str
@@ -235,6 +266,25 @@ class MultiTableQueryRequest(BaseModel):
     datasets: list[DatasetRef]
     query: str
     sessionId: str
+
+
+class DriveImportRequest(BaseModel):
+    link: str = ""
+    sessionId: str = ""
+
+
+class MySqlImportRequest(BaseModel):
+    # Everything is optional/loose on purpose: a validation failure must never echo the password
+    # back in an error body. data_connectors.validate_mysql_params() does the real checking.
+    host: str = ""
+    port: int | str | None = None
+    user: str = ""
+    password: str = ""
+    database: str = ""
+    table: str = ""
+    limit: int | str | None = None
+    ssl: bool = False
+    sessionId: str = ""
 
 
 def _check_secret(x_service_secret: str = Header(default="")) -> None:
@@ -336,6 +386,43 @@ async def upload(request: Request, x_service_secret: str = Header(default=""),
 
     audit_log.record("upload", bytes=writer.size, upload_id=url[-8:])
     return {"success": True, "url": url, "bytes": writer.size}
+
+
+@app.post("/connect/google-drive")
+def connect_google_drive(req: DriveImportRequest, x_service_secret: str = Header(default="")):
+    """Fetch link-shared Drive files into local storage (see data_connectors.py): one file or Google Sheet link as before,
+    or a folder link / several links, which import every CSV, Excel and Google Sheet they point to."""
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId or "anonymous", req.sessionId, "drive-import")
+    try:
+        out = data_connectors.import_drive_many(req.link)
+    except data_connectors.ConnectorError as e:
+        audit_log.record("connect_failed", source="google_drive")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return _server_error(e)
+    audit_log.record("connect_import", source="google_drive", bytes=out["bytes"], files=out.get("count", 1))
+    return out
+
+
+@app.post("/connect/mysql")
+def connect_mysql(req: MySqlImportRequest, x_service_secret: str = Header(default="")):
+    """Read one table from a MySQL server into local storage. Credentials are used once and never
+    stored or logged; only a short hash of the host goes to the audit log."""
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId or "anonymous", req.sessionId, "mysql-import")
+    params = req.model_dump(exclude={"sessionId"})
+    host_hash = data_connectors.short_hash(str(req.host).strip().lower())
+    try:
+        out = data_connectors.import_mysql(params)
+    except data_connectors.ConnectorError as e:
+        audit_log.record("connect_failed", source="mysql", host_hash=host_hash)
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        audit_log.record("connect_failed", source="mysql", host_hash=host_hash)
+        return {"success": False, "error": "Could not read from MySQL. Check the connection details."}
+    audit_log.record("connect_import", source="mysql", host_hash=host_hash, rows=out["rows"], bytes=out["bytes"])
+    return out
 
 
 @app.get("/health")
@@ -510,8 +597,83 @@ def clean_agent(req: CleanAgentRequest, x_service_secret: str = Header(default="
     if err is not None:
         return err
 
+    def _keep_agent_table(table):
+        # The agent's verified table becomes this session's working table: the questions that follow use it
+        # (session_cache.get in /analyze). Without this, the agent's changes would only ever be a preview.
+        session_cache.put(req.sessionId, req.fileUrl, req.filename, content, table)
+
     try:
-        return scrub_result(run_cleaning_agent(content, req.filename, req.sessionId))
+        return scrub_result(run_cleaning_agent(content, req.filename, req.sessionId, on_applied=_keep_agent_table))
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.post("/clean/fill")
+def clean_fill(req: FillRequest, x_service_secret: str = Header(default="")):
+    # Explicitly user-triggered: fills the remaining blank cells from the data itself (the column median for numbers,
+    # "Unknown" for text; never dates, true/false flags or identifiers) and keeps the result as this session's working
+    # table, so the questions that follow use it. No model is involved, so nothing can be invented.
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId, req.sessionId, req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    try:
+        return scrub_result(run_fill(content, req.filename, req.sessionId, req.fileUrl, unknown=req.unknown,
+                                  unknown_columns=req.unknownColumns))
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.post("/clean/audit")
+def clean_audit(req: AuditRequest, x_service_secret: str = Header(default="")):
+    # The audit trail: every change the pipeline made, with its row, column, before and after. Read-only.
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId, req.sessionId, req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    try:
+        return scrub_result(audit_service.audit_response(
+            content, req.filename, req.sessionId, req.fileUrl, scope=req.scope, offset=req.offset, limit=req.limit,
+            rule=req.rule, column=req.column, action=req.action, q=req.q, force=req.refresh))
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.post("/clean/audit/csv")
+def clean_audit_csv(req: AuditRequest, x_service_secret: str = Header(default="")):
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId, req.sessionId, req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    try:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(audit_service.audit_csv(content, req.filename, req.sessionId, req.fileUrl, req.scope),
+                                 media_type="text/csv")
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.post("/clean/duplicates")
+def clean_duplicates(req: CleanAgentRequest, x_service_secret: str = Header(default="")):
+    # The user's answer to "keep or remove the identical rows": drops the repeats from the working table.
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId, req.sessionId, req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    try:
+        return scrub_result(audit_service.remove_duplicates(content, req.filename, req.sessionId, req.fileUrl))
     except Exception as e:
         return _server_error(e)
 

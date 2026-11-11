@@ -1,0 +1,6 @@
+# Steps 1-2. Later steps add: streamlit.
+pandas>=2.0
+pydantic>=2.5
+rapidfuzz>=3.0
+requests>=2.31
+pytest>=7.0

@@ -163,20 +163,41 @@ def _fast_excel_engine():
     return None
 
 
-def _read_excel_with_engine(file_bytes: bytes, filename: str, engine):
+def _read_excel_with_engine(file_bytes: bytes, filename: str, engine, na_policy: str = "legacy"):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         xls = pd.ExcelFile(io.BytesIO(file_bytes), engine=engine) if engine else pd.ExcelFile(io.BytesIO(file_bytes))
         if len(xls.sheet_names) == 1:
-            return pd.read_excel(xls, sheet_name=0)
+            df = pd.read_excel(xls, sheet_name=0)
+            return _restore_excel_na(df, file_bytes, xls.sheet_names[0], engine, na_policy)
 
         sheet_name, df = _pick_best_excel_sheet(file_bytes, xls)
+        df = _restore_excel_na(df, file_bytes, sheet_name, engine, na_policy)
         print(
             f"[file_reader] '{filename}' has {len(xls.sheet_names)} sheets "
             f"{xls.sheet_names} — auto-selected '{sheet_name}' ({len(df)} rows) "
             f"as the largest data sheet ({engine or 'openpyxl'}).",
             flush=True,
         )
+        return df
+
+
+def _restore_excel_na(df: pd.DataFrame, file_bytes: bytes, sheet, engine, na_policy: str) -> pd.DataFrame:
+    """The safe policy for Excel: a real "NA" / "None" text cell (North America in a TERRITORY column) is put back after
+    pandas read it as missing, by the same fail-closed second read the CSV path uses (missing_tokens.py). Any problem
+    leaves the legacy read untouched. The legacy policy does nothing."""
+    if na_policy != "safe":
+        return df
+
+    def reread(columns: list) -> pd.DataFrame:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            return pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet, usecols=columns, dtype=str, na_filter=False,
+                                 **({"engine": engine} if engine else {}))
+
+    try:
+        return _restore_real_na_tokens(df, file_bytes, {}, reread=reread)
+    except Exception:  # noqa: BLE001  never let the restore break a read
         return df
 
 
@@ -208,14 +229,53 @@ def read_tabular_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
     return cache_layer.cached_parse(file_bytes, filename, parse, na_policy=APP_NA_POLICY if takes_policy else "legacy")
 
 
-def _restore_real_na_tokens(df: pd.DataFrame, file_bytes: bytes, read_kwargs: dict) -> pd.DataFrame:
+_DELIMITER_CANDIDATES = (";", "\t", "|")
+_DELIMITER_SAMPLE_BYTES = 64 * 1024
+
+
+def detect_delimiter(file_bytes: bytes) -> str:
+    """The field separator of a CSV/TXT file. A comma unless the first lines clearly use another one: the header and at
+    least 80% of the sampled lines must split into the same number (2 or more) of fields with that separator, and a comma
+    must NOT do so. So every comma file reads exactly as before, and a semicolon, tab or pipe file (common in European
+    exports) is no longer read as one wide column. Never raises."""
+    import csv
+    try:
+        cut = len(file_bytes) > _DELIMITER_SAMPLE_BYTES
+        text = file_bytes[:_DELIMITER_SAMPLE_BYTES].decode("utf-8", errors="replace").lstrip("\ufeff")
+        lines = text.splitlines()
+        if cut and len(lines) > 1:
+            lines = lines[:-1]                                   # the last line of a cut sample is incomplete
+        lines = [ln for ln in lines if ln.strip()][:30]
+        if len(lines) < 2:
+            return ","
+
+        def consistent(delim: str) -> int:
+            counts = []
+            for ln in lines:
+                try:
+                    counts.append(len(next(csv.reader([ln], delimiter=delim))))
+                except (csv.Error, StopIteration):
+                    counts.append(0)
+            n = counts[0]
+            return n if n >= 2 and sum(c == n for c in counts) >= 0.8 * len(counts) else 0
+
+        if consistent(","):
+            return ","
+        best = max(_DELIMITER_CANDIDATES, key=consistent)
+        return best if consistent(best) else ","
+    except Exception:  # noqa: BLE001  detection must never break a read
+        return ","
+
+
+def _restore_real_na_tokens(df: pd.DataFrame, file_bytes: bytes, read_kwargs: dict, reread=None) -> pd.DataFrame:
     """The "safe" policy's second pass for CSV: put back a real "NA" / "None" that pandas read as missing (see
     missing_tokens.py for the rule and the fail-closed checks). `read_kwargs` are the kwargs of the first read that
     worked (today: the encoding), so the second read parses the file the same way."""
     import missing_tokens
 
-    def reread(columns: list) -> pd.DataFrame:
-        return pd.read_csv(io.BytesIO(file_bytes), usecols=columns, dtype=str, na_filter=False, **read_kwargs)
+    if reread is None:
+        def reread(columns: list) -> pd.DataFrame:
+            return pd.read_csv(io.BytesIO(file_bytes), usecols=columns, dtype=str, na_filter=False, **read_kwargs)
 
     result = missing_tokens.restore_ambiguous_tokens(df, reread)
     if result.fallback_reason:
@@ -237,7 +297,7 @@ def _read_tabular_file_uncached(file_bytes: bytes, filename: str, na_policy: str
 
     na_policy: "legacy" (the default) is the original behaviour, unchanged. "safe" is what the app asks for through
     read_tabular_file: for CSV/TXT a real "NA" / "None" (such as North America in a TERRITORY column) is put back
-    after pandas turned it into a missing value. Excel is not affected by the policy."""
+    after pandas turned it into a missing value. Excel gets the same second read for a real NA (see _restore_excel_na)."""
     from missing_tokens import check_policy
     check_policy(na_policy)
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
@@ -256,7 +316,7 @@ def _read_tabular_file_uncached(file_bytes: bytes, filename: str, na_policy: str
         last_exc = None
         for engine in engines:
             try:
-                return _read_excel_with_engine(file_bytes, filename, engine)
+                return _read_excel_with_engine(file_bytes, filename, engine, na_policy)
             except Exception as e:  # noqa: BLE001 — retried with the next engine
                 last_exc = e
                 if engine is not None:
@@ -266,14 +326,30 @@ def _read_tabular_file_uncached(file_bytes: bytes, filename: str, na_policy: str
         raise last_exc  # pragma: no cover
 
     if ext in ("csv", "txt"):
+        reader_notes: list = []
+        if na_policy == "safe":
+            # STRUCTURE first (stage0_bridge.py): junk lines above the header, footer notes, a "Total" row, rows with an
+            # extra field. It returns None when the file has no structural defect, so a clean file reads exactly as before,
+            # and it never raises. The legacy policy does not call it.
+            import stage0_bridge
+            repaired, reader_notes, _info = stage0_bridge.repair(file_bytes)
+            if repaired is not None:
+                file_bytes = repaired
         read_kwargs: dict = {}
+        delim = detect_delimiter(file_bytes)
+        if delim != ",":
+            read_kwargs["sep"] = delim
+            name = {";": "semicolon", "\t": "tab", "|": "pipe"}.get(delim, delim)
+            reader_notes = list(reader_notes) + [f"✓ Read the file as {name}-separated"]
         try:
             df = pd.read_csv(io.BytesIO(file_bytes), **read_kwargs)
         except UnicodeDecodeError:
-            read_kwargs = {"encoding": "latin1"}
+            read_kwargs = {**read_kwargs, "encoding": "latin1"}
             df = pd.read_csv(io.BytesIO(file_bytes), **read_kwargs)
         if na_policy == "safe":
             df = _restore_real_na_tokens(df, file_bytes, read_kwargs)
+            if reader_notes:
+                df.attrs["reader_notes"] = list(reader_notes)   # shown in the cleaning report (cleaning.py)
         return df
 
     raise ValueError(

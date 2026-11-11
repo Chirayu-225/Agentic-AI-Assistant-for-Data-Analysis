@@ -159,7 +159,30 @@ def _parse_fix_response(raw: str) -> tuple[list[str], str]:
     return reasoning_lines, code
 
 
-_NOTHING_APPLIED = {"applied": False, "reverted": [], "keptChanges": []}
+_NOTHING_APPLIED = {"applied": False, "reverted": [], "keptChanges": [], "newColumns": []}
+
+
+def _with_flag_columns(message: str, new_columns: list) -> str:
+    """Add "N flag columns added" to the verifier's one-line message."""
+    n = len(new_columns)
+    return f"{message}; {n} flag column{'s' if n != 1 else ''} added" if n else message
+
+
+def _repair_note(code: str, error) -> str:
+    """Appended to the fix prompt for the ONE repair attempt after the sandbox rejected the model's script. The error is
+    scrubbed (no paths, no traceback) and capped; the rules are restated because a repaired script is checked by the
+    same verifier as any other."""
+    from error_scrub import scrub_error_text
+    err = scrub_error_text(str(error or "unknown error"))[:300]
+    return (
+        "\n\nYour previous code was rejected by the sandbox with: " + err + "\n"
+        "Rewrite the COMPLETE code block so that it runs. The sandbox already has df, pd and np: ALL import statements "
+        "are blocked (including `import re`), so never write the word import. For regular expressions use pandas string "
+        "methods with a plain string pattern, for example df['col'].astype(str).str.match('^[0-9]{5}$') (no re.compile). "
+        "The same hard rules apply: never blank, fill, rename or drop existing values; only add flag columns or tidy "
+        "whitespace and case.\n"
+        "Previous code that failed:\n```python\n" + code[:3000] + "\n```"
+    )
 
 
 def _verified_table(df_before: pd.DataFrame, df_fix: pd.DataFrame):
@@ -184,14 +207,111 @@ def _verified_table(df_before: pd.DataFrame, df_fix: pd.DataFrame):
         "applied": bool(result["kept_changes"]),
         "reverted": [agent_verify.describe_violation(v) for v in result["violations"]],
         "keptChanges": result["kept_changes"],
-        "message": agent_verify.build_message(result),
+        "newColumns": list(result["new_columns"]),
+        "message": _with_flag_columns(agent_verify.build_message(result), result["new_columns"]),
     }
 
 
+def _keep_for_questions(on_applied, df_used: pd.DataFrame, verdict: dict) -> dict:
+    """The verified table becomes the working table for the questions that follow, but only if the verifier kept at
+    least one change. `on_applied` is how the caller stores it (the API route saves it in the session cache); with no
+    hook (library use, tests) nothing is stored and the response is unchanged. If storing fails the user is told the
+    changes were NOT kept, never that they were."""
+    if on_applied is None or not verdict.get("applied"):
+        return verdict
+    try:
+        on_applied(df_used)
+    except Exception:
+        import traceback
+        _log_detail("could not keep the agent's table for later questions", traceback.format_exc())
+        return {**verdict, "usedForQuestions": False,
+                "message": str(verdict.get("message", "")).replace("used for your questions", "not kept for your questions")}
+    # The working table lives in an in-memory session cache: it expires, and a backend restart clears it. Say so, so a
+    # later question that no longer uses it does not contradict the banner.
+    return {**verdict, "usedForQuestions": True,
+            "message": f"{verdict.get('message', '')}; kept for the next {_kept_minutes()} minutes"}
+
+
+def _kept_minutes() -> int:
+    import session_cache
+    return max(1, int(session_cache.TTL_SECONDS // 60))
+
+
+def _fill_message(existing, report: dict, kept) -> str:
+    """The agent's one-line summary when it filled blanks (before the AI's own result, so the banner stays truthful)."""
+    by: dict = {}
+    for f in report["filled"]:
+        by[f["method"]] = by.get(f["method"], 0) + f["count"]
+    bits = []
+    if by.get("inferred"):
+        bits.append(f"{by['inferred']:,} from other rows that prove the value")
+    if by.get("median"):
+        bits.append(f"{by['median']:,} numbers with their column median")
+    sentence = f"Filled {report['total_filled']:,} missing values ({', '.join(bits)})"
+    if kept is True:
+        sentence += f", used for your questions for the next {_kept_minutes()} minutes"
+    elif kept is False:
+        sentence += ", but not kept for your questions"
+    rest = str(existing or "").replace("No data was changed", "No other data was changed")
+    return f"{sentence}. {rest}".strip()
+
+
+_REPAIR_PHRASES = {
+    "unit_in_text": "read '{c}' as numbers in one unit",
+    "percent_scale": "rescaled whole percentages in '{c}'",
+    "magnitude_outlier": "restored values in '{c}' that were 100x too large",
+    "impossible_negative": "blanked impossible negative values in '{c}'",
+    "future_date": "blanked future dates in '{c}'",
+    "end_before_start": "blanked end dates earlier than their start in '{c}'",
+    "mixed_date_formats": "read dates in other formats in '{c}'",
+    "swapped_values": "swapped back swapped values ({c})",
+    "near_duplicate_rows": "dropped near-duplicate rows",
+}
+
+
+def _validators_message(v: dict, suffix: str = "") -> str:
+    """One sentence for the banner: what the deterministic repairs did (value_validators.py), counts included."""
+    bits = [f"{_REPAIR_PHRASES.get(e['rule'], e['rule']).format(c=e['column'])}: {e['count']:,}" for e in v["entries"]]
+    n = v["changed"] + v["rowsDropped"]
+    return f"Repaired {n:,} value{'s' if n != 1 else ''} ({'; '.join(bits)}){suffix}"
+
+
 def run_cleaning_agent(
-    csv_bytes: bytes, filename: str, session_id: str, preview_rows: int = 10
+    csv_bytes: bytes, filename: str, session_id: str, preview_rows: int = 10, on_applied=None
+) -> dict:
+    """The agent. It FILLS blanks first (deterministically, from evidence in the table itself; see fill_missing.py), then
+    lets the model audit the rest. The response gains a "fill" block: what was filled, and what could not be filled and
+    needs the user's answer (fill with "Unknown" or leave empty). Wraps _run_cleaning_agent so every path reports it."""
+    state: dict = {}
+    result = _run_cleaning_agent(csv_bytes, filename, session_id, preview_rows, on_applied, state)
+    report = state.get("report")
+    if not isinstance(result, dict) or report is None:
+        return result
+    out = {**result, "fill": {"filled": report["filled"], "skipped": report["skipped"],
+                              "totalFilled": report["total_filled"], "remainingText": report["remaining_text"],
+                              "kept": state.get("kept")}}
+    if report["total_filled"] and out.get("success"):
+        out["message"] = _fill_message(out.get("message"), report, state.get("kept"))
+    v = state.get("validators")
+    if v and v["entries"]:
+        out["validators"] = {"entries": v["entries"], "changed": v["changed"], "rowsDropped": v["rowsDropped"],
+                             "kept": state.get("kept")}
+        if out.get("success"):
+            kept = state.get("kept")
+            suffix = ""
+            if not report["total_filled"]:      # the fill sentence already says whether the table is kept
+                suffix = (f", used for your questions for the next {_kept_minutes()} minutes" if kept is True
+                          else ", but not kept for your questions" if kept is False else "")
+            out["message"] = f"{_validators_message(v, suffix)}. {out.get('message') or ''}".strip()
+    return out
+
+
+def _run_cleaning_agent(
+    csv_bytes: bytes, filename: str, session_id: str, preview_rows: int = 10, on_applied=None, state=None
 ) -> dict:
     """
+    0. FILL: blanks a column of the same table proves (or, for numbers, the column median) are filled first, by code,
+       not by the model; the filled table is what everything below works on.
     1. Runs rule_based_clean() first (identical to the plain /clean report).
     2. DIAGNOSE: builds a widened defect-detection profile (every
        column, full distinct-value sets for low-cardinality columns —
@@ -230,6 +350,54 @@ def run_cleaning_agent(
             "columns": len(df_raw.columns),
             "nullValues": int(df_raw.isnull().sum().sum()),
         }
+
+        # FILL FIRST, in code, so it still happens when the model's part fails. A blank is filled only from evidence in the
+        # table (fill_missing.py); text with no evidence stays blank and becomes a QUESTION for the user.
+        from fill_missing import fill_missing
+        df_rule_cleaned, fill_report = fill_missing(df_rule_cleaned)
+
+        # THEN the deterministic value repairs (value_validators.py): impossible negatives, future dates, mixed date
+        # formats, units in text, swapped values, near-duplicate rows... Each one needs evidence in the table, reports
+        # what it changed, and its blanks come AFTER the fill, so they are never filled back in. No model is involved.
+        validators_report = {"entries": [], "changed": 0, "rowsDropped": 0}
+        try:
+            from value_validators import validate_values
+            df_rule_cleaned, validators_report = validate_values(df_rule_cleaned)
+        except Exception:
+            import traceback
+            _log_detail("value validators failed; continuing without them", traceback.format_exc())
+        # NUMBERS that other columns determine exactly (amount = quantity x unit_price) are computed AFTER the validators, so
+        # a blanked impossible value is recovered and a corrupted factor is never used. Exact arithmetic, nothing guessed.
+        try:
+            from fill_missing import fill_derived
+            df_rule_cleaned, derived_entries = fill_derived(df_rule_cleaned)
+            if derived_entries:
+                fill_report = dict(fill_report)
+                fill_report["filled"] = list(fill_report["filled"]) + derived_entries
+                fill_report["total_filled"] = int(fill_report["total_filled"]) + sum(d["count"] for d in derived_entries)
+                got = {d["column"]: d["count"] for d in derived_entries}
+                kept_q = []
+                for q in fill_report.get("skipped", []):      # a question that arithmetic has answered is no longer asked
+                    left = q["count"] - got.get(q["column"], 0) if q.get("kind") == "no_evidence" else q["count"]
+                    if left > 0:
+                        kept_q.append({**q, "count": left})
+                fill_report["skipped"] = kept_q
+        except Exception:
+            import traceback
+            _log_detail("derived fill failed; continuing without it", traceback.format_exc())
+        if state is not None:
+            state["report"] = fill_report
+            state["validators"] = validators_report
+            state["kept"] = None
+            if (fill_report["total_filled"] or validators_report["changed"] or validators_report["rowsDropped"]) \
+                    and on_applied is not None:
+                try:
+                    on_applied(df_rule_cleaned)
+                    state["kept"] = True
+                except Exception:
+                    import traceback
+                    _log_detail("could not keep the filled table for later questions", traceback.format_exc())
+                    state["kept"] = False
 
         defect_profile = build_defect_profile(df_rule_cleaned)
         profile_str = format_defect_profile_for_llm(defect_profile)
@@ -292,6 +460,23 @@ def run_cleaning_agent(
         sbr = run_sandboxed(code, df_rule_cleaned, include_charts=False, timeout_seconds=20)
 
         if not sbr.success or not sbr.produced:
+            # ONE repair attempt, the way the query path does it: show the model its own (scrubbed) error. The usual
+            # cause is a blocked import (the sandbox allows none), which the model fixes once it is told.
+            _log_detail("fix code failed to execute; one repair attempt", f"{sbr.error}\n--- fix code was:\n{code}")
+            try:
+                from llm_provider import llm_uncached_code_call
+                repair_raw = llm_uncached_code_call(
+                    fix_prompt + _repair_note(code, sbr.error), temperature=0.1, max_tokens=4096)
+                repair_reasoning, repair_code = _parse_fix_response(repair_raw)
+                if repair_code:
+                    repaired = run_sandboxed(repair_code, df_rule_cleaned, include_charts=False, timeout_seconds=20)
+                    if repaired.success and repaired.produced:
+                        sbr, code, reasoning_lines = repaired, repair_code, (repair_reasoning or reasoning_lines)
+            except Exception:
+                import traceback
+                _log_detail("the repair attempt itself failed", traceback.format_exc())
+
+        if not sbr.success or not sbr.produced:
             _log_detail("fix code failed to execute", f"{sbr.error}\n--- fix code was:\n{code}")
             return {
                 "success": False,
@@ -315,7 +500,7 @@ def run_cleaning_agent(
         # blanked, filled or changed are reverted, structural damage discards the fix. The result is the working table.
         df_used, verdict = _verified_table(df_rule_cleaned, df_final)
 
-        return {
+        response = {
             "success": True,
             "filename": filename,
             "ruleLog": rule_log,
@@ -326,12 +511,18 @@ def run_cleaning_agent(
             "after": {
                 "rows": len(df_used),
                 "columns": len(df_used.columns),
-                "nullValues": int(df_used.isnull().sum().sum()),
+                # Over the ORIGINAL columns only (the rule-cleaned table's), like the verifier's tripwire: the empty
+                # cells of flag columns the agent ADDED are not missing data in the user's table.
+                "nullValues": int(df_used.iloc[:, : len(df_rule_cleaned.columns)].isnull().sum().sum()),
             },
             "preview": _records(df_used.head(preview_rows)),
             "previewCount": min(preview_rows, len(df_used)),
             **verdict,
         }
+        # Only now, with the response fully built, does the verified table become the working table: had building the
+        # response failed, the user would have seen an error while a table was already stored.
+        response.update(_keep_for_questions(on_applied, df_used, verdict))
+        return response
     except Exception:
         import traceback
         _log_detail("agent failed", traceback.format_exc())

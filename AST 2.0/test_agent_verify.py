@@ -204,6 +204,10 @@ def main():
           r["fault"] is True and r["ok"] is False and r["repaired"].equals(before) and not r["structural"], str({k: r[k] for k in ("ok", "fault")}))
     after = before.copy(); after["amount_is_outlier"] = [None] * len(after)
     check("tripwire: nulls in a NEW column never trigger it", verify(before, after)["fault"] is False)
+    r = verify(before, after)
+    check("tripwire: a new flag column that is entirely None is accepted and kept, not counted as lost data",
+          r["ok"] and not r["fault"] and r["new_columns"] == ["amount_is_outlier"] and r["repaired"]["amount_is_outlier"].isna().all()
+          and int(r["repaired"][list(before.columns)].isna().sum().sum()) == int(before.isna().sum().sum()))
 
     # ── escaping, counts, speed ────────────────────────────────────────────────────────────────────────────────
     b7 = pd.DataFrame({"note": ["line one\nline two\t" + "x" * 100 + "\x07"] + ["ok"] * 30})

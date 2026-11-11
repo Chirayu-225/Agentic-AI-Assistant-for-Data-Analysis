@@ -24,7 +24,7 @@ DIAG = ("COLUMN: state\nTYPE: inconsistent_categories\nEVIDENCE: some states loo
 STATES = ["CA", "NY", "TX", "FL", "WA", "OR", "NV", "AZ", "CO", "UT", "MA", "NJ", "PA", "OH", "MI"]
 LINES = ["Planes", "Ships", "Trains", "Cars", "Trucks"]
 EXISTING_KEYS = {"success", "filename", "ruleLog", "defects", "agentUsed", "reasoning", "before", "after", "preview", "previewCount"}
-NEW_KEYS = {"applied", "reverted", "keptChanges", "message"}
+NEW_KEYS = {"applied", "reverted", "keptChanges", "message", "newColumns"}
 
 
 def check(label, cond, detail=""):
@@ -136,7 +136,9 @@ def main():
         df["amount_is_outlier"] = df["amount"] > 100
         return df
     r, _ = run(good)
-    check("safe fix: applied, with the exact message", r["applied"] is True and r["message"] == "Applied 2 safe changes, used for your questions", r["message"])
+    check("safe fix: applied, with the exact message (and the flag column counted)", r["applied"] is True
+          and r["message"] == "Applied 2 safe changes, used for your questions; 1 flag column added", r["message"])
+    check("safe fix: newColumns names the flag column", r["newColumns"] == ["amount_is_outlier"], str(r["newColumns"]))
     check("safe fix: the new flag column is in the result", "amount_is_outlier" in r["preview"][0] and r["after"]["columns"] == r["before"]["columns"] + 1,
           str(r["after"]))
     check("safe fix: keptChanges names both", {k["column"] for k in r["keptChanges"]} == {"productline", "amount_is_outlier"}, str(r["keptChanges"]))
@@ -149,8 +151,25 @@ def main():
         return df
     r, _ = run(mixed)
     check("mixed fix: the good change stays, the bad column is reverted, and the message says both",
-          r["applied"] is True and r["message"] == "Applied 1 safe change; reverted 1 column that would have changed your values"
+          r["applied"] is True
+          and r["message"] == "Applied 1 safe change; reverted 1 column that would have changed your values; 1 flag column added"
           and r["reverted"] == ["state: 8 existing values would have been blanked"], f"{r['message']} {r['reverted']}")
+
+    # ── 6b. flag columns that are empty in most rows do not count as missing data ──────────────────────────────
+    def three_sparse_flags(df):
+        for name, step in (("sales_is_outlier", 7), ("qty_is_outlier", 11), ("amount_is_high", 13)):
+            df[name] = [True if i % step == 0 else None for i in range(len(df))]            # None in most rows
+        return df
+    r, _ = run(three_sparse_flags)
+    check("three sparse flag columns: nullValues after equals nullValues of the table it started from",
+          r["after"]["nullValues"] == base_nulls, f"{r['after']['nullValues']} vs {base_nulls}")
+    check("three sparse flag columns: they ARE in the result (columns grew by 3)", r["after"]["columns"] == r["before"]["columns"] + 3
+          and r["preview"][0].keys() >= {"sales_is_outlier", "qty_is_outlier", "amount_is_high"}, str(r["after"]))
+    check("three sparse flag columns: newColumns has the 3 names", r["newColumns"] == ["sales_is_outlier", "qty_is_outlier", "amount_is_high"],
+          str(r["newColumns"]))
+    check("three sparse flag columns: the message mentions '3 flag columns added'", "3 flag columns added" in r["message"], r["message"])
+    check("every response has newColumns (also when the fix is reverted or there is nothing to add)",
+          run(blank_state)[0]["newColumns"] == [] and run(lambda df: df)[0]["newColumns"] == [])
 
     # ── 7. proposal-only lines are display text; the code is the only thing executed ───────────────────────────
     seen_code.clear()
@@ -199,6 +218,8 @@ def main():
     for rule in ("NEVER replace an existing value with NaN", "NEVER fill missing values", "NEVER rename or merge categories",
                  "NEVER drop rows or columns", "ONLY add new boolean flag columns", "proposal only:"):
         check(f"fix prompt contains the rule: {rule}", rule in prompt)
+    check("fix prompt: a flag column must be boolean with False, never empty, for rows that are not flagged",
+          "boolean with False" in prompt and "never empty" in prompt and "not flagged" in prompt)
     check("fix prompt no longer encourages imputing or merging", "Not Applicable" not in prompt and "canonical" not in prompt.lower()
           and "map every variant" not in prompt)
     check("fix prompt keeps the format the agent parses and the column-names hint",

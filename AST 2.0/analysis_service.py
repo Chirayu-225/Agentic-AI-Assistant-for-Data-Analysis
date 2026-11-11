@@ -34,6 +34,7 @@ import pandas as pd
 
 from cleaning import rule_based_clean
 from file_reader import read_tabular_file, should_use_large_csv_path, MAX_RESULT_ROWS
+import file_reader as _file_reader
 from sandbox_limits import run_sandboxed
 
 
@@ -161,9 +162,9 @@ def _run_large_csv_analysis(csv_bytes: bytes, filename: str, query: str, session
         # is the one place this path still touches pandas, and it's
         # bounded (nrows) regardless of the real file's size.
         try:
-            sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20)
+            sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, sep=_file_reader.detect_delimiter(csv_bytes))
         except UnicodeDecodeError:
-            sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, encoding="latin1")
+            sample_df = pd.read_csv(io.BytesIO(csv_bytes), nrows=20, encoding="latin1", sep=_file_reader.detect_delimiter(csv_bytes))
 
         cols = ", ".join(f"{c} ({sample_df[c].dtype})" for c in sample_df.columns)
         # AI SECURITY: these sample rows are REAL values from the user's

@@ -1125,6 +1125,15 @@ PROFILES = {
 }
 
 
+# The experiment's questions on HELD-OUT dialects. Added AFTER the value validators and the structure bridge were written
+# against the dev tables above (see exp_shipped.py): same defect tags, same bundles, but the frozen vocabulary (sentinels,
+# date formats, number-in-text forms, units, categories) and a locale per family (eu / swiss / suffix_code), at a different
+# size. The dev list above is untouched, so the experiment's data hash (PREREG.json) still matches.
+_EXP_FROZEN_LOCALE = {"orders": "eu", "staff": "swiss", "inventory": "suffix_code"}
+PROFILES["exp"]["frozen"] = [(fam, 500, _EXP_FROZEN_LOCALE[fam], rate, bundle, flags)
+                             for (fam, _n, _loc, rate, bundle, flags) in PROFILES["exp"]["dev"]]
+
+
 def specs_for(profile: str, split: str) -> list:
     return [CaseSpec(i, split, *t) for i, t in enumerate(PROFILES[profile][split])]
 

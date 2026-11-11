@@ -262,6 +262,11 @@ def detect_currencies(raw_df: pd.DataFrame) -> dict:
     return found
 
 
+def _dup_warning(n: int) -> str:
+    return (f"⚠ {n} row(s) are exact copies of another row — KEPT, because identical rows are often genuine repeat "
+            f"transactions. The audit trail lists which rows, and lets you remove them if they are accidental copies.")
+
+
 def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
                      na_policy: str = "legacy") -> tuple[pd.DataFrame, list[str]]:
     """
@@ -297,6 +302,7 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
     # "safe" NA policy: what the reader already decided (a marker "NA" it blanked) goes first in the log, and the
     # per-column decision "are 'na' / 'none' markers here, or real values?" is made once per column, lazily.
     if safe_na:
+        log.extend(raw_df.attrs.get("reader_notes", []))   # structure repairs made while reading (stage0_bridge.py)
         log.extend(raw_df.attrs.get("na_notes", []))
     _ambiguous_are_markers: dict = {}
 
@@ -323,9 +329,11 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
         ).sum()
         >= len(df_c.columns) * 0.6
     )
+    row_offset = 0                       # raw row labels -> the cleaned table's rows (audit_ledger.py reads attrs["source_rows"])
     if (cols_are_integers or cols_are_unnamed) and row0_looks_like_header:
         df_c.columns = [str(v).strip() for v in df_c.iloc[0]]
         df_c = df_c.iloc[1:].reset_index(drop=True)
+        row_offset = 1
         log.append("✓ Promoted row 0 to column headers")
 
     # ── 2. Normalise column names ──────────────────────────────────────────────
@@ -368,14 +376,14 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
         log.append(f"✓ Dropped {before_rows - df_c.shape[0]} fully-empty row(s)")
 
     # ── 4. Exact duplicate rows: reported, removed only on request ────────────
+    _dup_log_at = None
     n_dupes = int(df_c.duplicated().sum())
     if n_dupes and drop_exact_duplicates:
         df_c.drop_duplicates(inplace=True)
         log.append(f"✓ Removed {n_dupes} exact duplicate row(s), as requested")
     elif n_dupes:
-        log.append(f"⚠ {n_dupes} row(s) are exact copies of another row — KEPT, because "
-                   f"identical rows are often genuine repeat transactions. Remove them only "
-                   f"if they are accidental copies.")
+        _dup_log_at = len(log)
+        log.append(_dup_warning(n_dupes))
 
     # ── 5. Per-column type cleaning ───────────────────────────────────────────
     def _is_string_col(series):
@@ -556,7 +564,20 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
         if null_count:
             log.append(f"⚠ '{col}' has {null_count} missing value(s) — left blank (calculations skip them; nothing was filled in)")
 
+    if _dup_log_at is not None:          # the warning counted copies before the same-ID rule ran: say only what is still there
+        n_left = int(df_c.duplicated().sum())
+        log[_dup_log_at] = _dup_warning(n_left) if n_left else None
+        log = [l for l in log if l is not None]
+    try:                                 # which raw row each remaining row came from (the audit trail needs it; nothing else does)
+        _src = (pd.Index(df_c.index).to_numpy() + row_offset) if pd.api.types.is_integer_dtype(df_c.index) else None
+    except Exception:  # noqa: BLE001
+        _src = None
     df_c = df_c.reset_index(drop=True)
+    if _src is not None and len(_src) == len(df_c):
+        from row_trace import SourceRows
+        df_c.attrs["source_rows"] = SourceRows(_src)
+        if row_offset:
+            df_c.attrs["header_promoted"] = True
     if not log:
         log.append("✓ No issues detected — dataset looks clean")
     return df_c, log

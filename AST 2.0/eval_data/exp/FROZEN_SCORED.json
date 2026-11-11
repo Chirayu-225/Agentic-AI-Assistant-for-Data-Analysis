@@ -1,0 +1,53 @@
+{
+  "scored_utc": "2026-11-10T17:47:52+00:00",
+  "code_fingerprint": "b78c15fecfc0774dbfbdc4e1c1f00b9bc69a49db476299e7a73c3567c9147e8e",
+  "arms": [
+    "dirty",
+    "stage0",
+    "bridge",
+    "shipped",
+    "shipped_fill",
+    "attainable"
+  ],
+  "n_questions": 50,
+  "summary": {
+    "dirty": {
+      "all": 14,
+      "n": 50,
+      "structural": "2/10",
+      "value": "12/40"
+    },
+    "stage0": {
+      "all": 17,
+      "n": 50,
+      "structural": "4/10",
+      "value": "13/40"
+    },
+    "bridge": {
+      "all": 19,
+      "n": 50,
+      "structural": "6/10",
+      "value": "13/40"
+    },
+    "shipped": {
+      "all": 32,
+      "n": 50,
+      "structural": "6/10",
+      "value": "26/40"
+    },
+    "shipped_fill": {
+      "all": 32,
+      "n": 50,
+      "structural": "6/10",
+      "value": "26/40"
+    },
+    "attainable": {
+      "all": 50,
+      "n": 50,
+      "structural": "10/10",
+      "value": "40/40"
+    }
+  },
+  "skipped": {},
+  "note": "held-out dialect split; scored once; mechanical solver (the table is scored, not a model)"
+}

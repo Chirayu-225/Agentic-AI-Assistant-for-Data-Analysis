@@ -287,6 +287,12 @@ _PERSONAL_COMPACT = {
 }
 
 
+_RUN_TOGETHER_PERSONAL_SUFFIXES = (
+    "firstname", "lastname", "middlename", "fullname", "givenname", "familyname", "maidenname", "surname",
+    "phonenumber", "mobilenumber", "emailaddress",
+)
+
+
 def _tokens(name: object) -> list[str]:
     s = str(name)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)          # camelCase -> words
@@ -307,6 +313,15 @@ def classify_column_name(name: object) -> Optional[str]:
     if last in _PERSONAL_LAST_TOKENS and not (len(toks) > 1 and last == "contact"):
         return "personal"
     if last == "name" and len(toks) > 1 and any(t in _PERSON_PREFIXES for t in toks[:-1]):
+        return "personal"
+    # Run-together names with no separator (CONTACTFIRSTNAME, CUSTOMERLASTNAME, ADDRESSLINE1, EMAILADDRESS): the token
+    # rules above cannot split them, so look for the personal word inside the compact form. Over-withholding is the
+    # safe direction. A bare "name" and company-style names (customername, productname) are left as before.
+    if compact.endswith(_RUN_TOGETHER_PERSONAL_SUFFIXES):
+        return "personal"
+    if "addressline" in compact or ("address" in toks and "line" in toks):
+        return "personal"
+    if compact.endswith("address") and len(compact) > len("address"):
         return "personal"
     if compact == "name":
         return "review"

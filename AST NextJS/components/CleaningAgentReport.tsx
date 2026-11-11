@@ -2,6 +2,9 @@
 
 import type { CleanAgentResponse, DataQualityDefect } from "@/lib/pythonClient";
 
+// The user's answer to one question from the agent: fill that column's blanks with "Unknown", or leave them empty.
+export type FillChoice = "unknown" | "empty" | "working" | "failed";
+
 function DeltaStat({
   label,
   before,
@@ -52,9 +55,160 @@ function DefectCard({ defect }: { defect: DataQualityDefect }) {
   );
 }
 
-export default function CleaningAgentReport({ report }: { report: CleanAgentResponse }) {
+function AgentFillSection({
+  fill,
+  choices,
+  onChoose,
+}: {
+  fill: CleanAgentResponse["fill"];
+  choices?: Record<string, FillChoice>;
+  onChoose?: (column: string, choice: "unknown" | "empty") => void;
+}) {
+  if (!fill) return null;
+  const filled = fill.filled ?? [];
+  const skipped = fill.skipped ?? [];
+  const questions = skipped.filter((s) => s.kind === "no_evidence" && !s.numeric);
+  // number columns cannot be "Unknown": no question, just an honest note that they stay empty
+  const never = skipped.filter((s) => s.kind !== "no_evidence" || s.numeric);
+  if (filled.length === 0 && questions.length === 0 && never.length === 0) return null;
+
+  return (
+    <div className="mb-5">
+      {filled.length > 0 && (
+        <>
+          <p className="font-mono text-[11px] text-muted tracking-widest mb-2">
+            FILLED BY THE AGENT (no AI, nothing invented)
+          </p>
+          <ul className="font-mono text-xs text-text flex flex-col gap-1 mb-4">
+            {filled.map((f, i) => (
+              <li key={`${f.column}-${i}`}>
+                ✓ {f.column}: {f.count.toLocaleString()} filled{" "}
+                {f.method === "inferred"
+                  ? `from the other rows with the same ${f.from ?? "key"}`
+                  : f.method === "derived"
+                  ? `by exact arithmetic: ${String(f.value)}`
+                  : f.method === "median"
+                    ? `with the column median (${String(f.value)})`
+                    : `with "${String(f.value)}"`}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {questions.length > 0 && (
+        <>
+          <p className="font-mono text-[11px] text-[#FBBF24] tracking-widest mb-2">
+            QUESTIONS FOR YOU — NOTHING IN THE FILE TELLS ME THESE VALUES
+          </p>
+          <div className="flex flex-col gap-2 mb-4">
+            {questions.map((q) => {
+              const choice = choices?.[q.column];
+              return (
+                <div key={q.column} className="border border-[#FBBF24]/40 rounded-lg bg-[#FBBF24]/5 p-3">
+                  <p className="font-mono text-xs text-text mb-2">
+                    {q.column}: {q.count.toLocaleString()} blank. Fill them with &quot;Unknown&quot;, or leave them
+                    empty?
+                  </p>
+                  {choice === "unknown" && (
+                    <p className="font-mono text-xs text-accent">
+                      ✓ filled with &quot;Unknown&quot;, used for your questions
+                    </p>
+                  )}
+                  {choice === "empty" && <p className="font-mono text-xs text-muted">✓ left empty</p>}
+                  {choice === "working" && (
+                    <p className="font-mono text-xs text-accent animate-pulse">▸ filling...</p>
+                  )}
+                  {(choice === undefined || choice === "failed") && onChoose && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => onChoose(q.column, "unknown")}
+                        className="px-3 py-1.5 rounded-md bg-accent text-base font-mono text-xs font-semibold"
+                      >
+                        Fill with &quot;Unknown&quot;
+                      </button>
+                      <button
+                        onClick={() => onChoose(q.column, "empty")}
+                        className="px-3 py-1.5 rounded-md border border-border text-text font-mono text-xs"
+                      >
+                        Leave empty
+                      </button>
+                      {choice === "failed" && (
+                        <span className="font-mono text-xs text-red-400">could not fill, try again</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {never.length > 0 && (
+        <>
+          <p className="font-mono text-[11px] text-muted tracking-widest mb-1">LEFT BLANK ON PURPOSE</p>
+          <ul className="font-mono text-xs text-muted flex flex-col gap-1">
+            {never.map((s, i) => (
+              <li key={`${s.column}-${i}`}>
+                ⚠ {s.column}: {s.count.toLocaleString()} blank, {s.reason}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+// What the deterministic repairs did (value_validators.py). Every line says what in the table justified it, with examples,
+// so nothing is changed silently. Blanks are never filled back in: these run after the fill step.
+function AgentRepairSection({ validators }: { validators: CleanAgentResponse["validators"] }) {
+  const entries = validators?.entries ?? [];
+  if (!validators || entries.length === 0) return null;
+  return (
+    <div className="mb-5">
+      <p className="font-mono text-[11px] text-muted tracking-widest mb-2">
+        REPAIRED BY THE AGENT (no AI — each repair needed evidence in the table)
+      </p>
+      <ul className="font-mono text-xs text-text flex flex-col gap-3">
+        {entries.map((e, i) => (
+          <li key={`${e.column}-${e.rule}-${i}`}>
+            <span className="text-accent">✓</span> <span className="font-semibold">{e.column}</span>:{" "}
+            {e.count.toLocaleString()} {e.action}
+            <p className="text-muted mt-0.5">{e.evidence}</p>
+            {e.examples.length > 0 && (
+              <p className="text-muted mt-0.5">
+                e.g.{" "}
+                {e.examples
+                  .map((x) => `${String(x.before)} → ${x.after === null ? "left blank" : String(x.after)}`)
+                  .join("; ")}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {validators.kept === false && (
+        <p className="font-mono text-[11px] text-[#FBBF24] mt-2">
+          These repairs could not be kept for your questions.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default function CleaningAgentReport({
+  report,
+  choices,
+  onChoose,
+}: {
+  report: CleanAgentResponse;
+  choices?: Record<string, FillChoice>;
+  onChoose?: (column: string, choice: "unknown" | "empty") => void;
+}) {
   if (!report.success) {
     return (
+      <>
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4 mb-6">
         <p className="font-mono text-xs text-red-400 mb-1">// DATA QUALITY AGENT ERROR</p>
         <p className="text-red-300 text-sm">{report.error ?? "Data quality agent failed."}</p>
@@ -71,6 +225,9 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
           </>
         )}
       </div>
+      <AgentRepairSection validators={report.validators} />
+      <AgentFillSection fill={report.fill} choices={choices} onChoose={onChoose} />
+      </>
     );
   }
 
@@ -78,19 +235,25 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
 
   if (!report.agentUsed) {
     return (
-      <div className="border border-border rounded-lg bg-panel p-4 mb-6">
-        <p className="font-mono text-xs text-accent">
-          ✓ No data quality defects found — rule-based cleaning and the agent&apos;s own audit
-          both came back clean.
-        </p>
-      </div>
+      <>
+        <div className="border border-border rounded-lg bg-panel p-4 mb-6">
+          {report.message && <p className="font-mono text-xs text-text mb-2">{report.message}</p>}
+          <p className="font-mono text-xs text-accent">
+            ✓ No data quality defects found — rule-based cleaning and the agent&apos;s own audit
+            both came back clean.
+          </p>
+        </div>
+        <AgentRepairSection validators={report.validators} />
+        <AgentFillSection fill={report.fill} choices={choices} onChoose={onChoose} />
+      </>
     );
   }
 
   const { before, after, reasoning } = report;
   const reverted = report.reverted ?? [];
   // Green: safe changes were applied and nothing was reverted. Amber: nothing was changed, or something was reverted.
-  const bannerIsGreen = report.applied === true && reverted.length === 0;
+  const filledSomething = (report.fill?.totalFilled ?? 0) > 0 || (report.validators?.entries?.length ?? 0) > 0;
+  const bannerIsGreen = (report.applied === true || filledSomething) && reverted.length === 0;
 
   return (
     <div className="border border-accent/40 rounded-lg bg-panel p-5 mb-6">
@@ -117,6 +280,14 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
         </div>
       )}
 
+      {(report.newColumns ?? []).length > 0 && (
+        <p className="font-mono text-xs text-muted -mt-3 mb-5">
+          {(report.newColumns ?? []).length} flag column{(report.newColumns ?? []).length === 1 ? "" : "s"} added
+          {": "}
+          {(report.newColumns ?? []).join(", ")}
+        </p>
+      )}
+
       {before && after && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
           <DeltaStat label="NULL VALUES (before agent)" before={before.nullValues} after={after.nullValues} />
@@ -126,6 +297,9 @@ export default function CleaningAgentReport({ report }: { report: CleanAgentResp
           </div>
         </div>
       )}
+
+      <AgentRepairSection validators={report.validators} />
+      <AgentFillSection fill={report.fill} choices={choices} onChoose={onChoose} />
 
       {defects.length > 0 && (
         <>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import FileUpload, { UploadedFile } from "@/components/FileUpload";
+import type { UploadedFile } from "@/components/FileUpload";
+import DataSourcePicker, { ImportedDataset } from "@/components/DataSourcePicker";
 import { TableResult } from "@/components/ResultDisplay";
 import ShowWork from "@/components/ShowWork";
 import { getOrCreateSessionId } from "@/lib/sessionId";
@@ -71,7 +72,7 @@ export default function MultiTableTab() {
   const [result, setResult] = useState<MultiTableQueryResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  function handleDatasetUploaded(file: UploadedFile) {
+  function handleDatasetUploaded(file: ImportedDataset) {
     // Uploads are content-addressed: the same file always gets the same
     // url, so a repeat is caught here instead of joining a table to itself.
     const existing = datasets.find((d) => d.url === file.url);
@@ -80,13 +81,34 @@ export default function MultiTableTab() {
       setShowUploadSlot(false);
       return;
     }
-    setNotice(null);
+    setNotice(file.note ?? null);
     setDatasets((prev) => {
       const base = defaultAliasFromFilename(file.filename);
       let alias = base;
       for (let n = 2; prev.some((d) => d.alias === alias); n++) alias = `${base}_${n}`;
       return [...prev, { ...file, alias }];
     });
+    setShowUploadSlot(false);
+  }
+
+  // One import that brought back several files (a Drive folder, or several links): add them all, each with its own alias.
+  function handleDatasetsImported(files: ImportedDataset[], note?: string) {
+    const next = [...datasets];
+    const repeats: string[] = [];
+    for (const file of files) {
+      if (next.some((d) => d.url === file.url)) {
+        repeats.push(file.filename);
+        continue;
+      }
+      const base = defaultAliasFromFilename(file.filename);
+      let alias = base;
+      for (let n = 2; next.some((d) => d.alias === alias); n++) alias = `${base}_${n}`;
+      next.push({ ...file, alias });
+    }
+    setDatasets(next);
+    const bits = [note ?? ""];
+    if (repeats.length > 0) bits.push(`Already added, skipped: ${repeats.join(", ")}.`);
+    setNotice(bits.filter(Boolean).join(" ") || null);
     setShowUploadSlot(false);
   }
 
@@ -132,7 +154,7 @@ export default function MultiTableTab() {
           // MULTI-DATASET QUERY
         </p>
         <p className="font-mono text-xs text-muted mb-4">
-          Upload 2 or more datasets, give each a short name, then ask a question that spans
+          Add 2 or more datasets — upload a file, paste a Google Drive link, or connect a MySQL table — give each a short name, then ask a question that spans
           them — joins, aggregations across files, anything a SQL query could answer. Runs on
           real SQL (DuckDB) inside the same sandboxed pipeline as every other query in this
           app, not a text summary — no numbers here are guessed.
@@ -174,13 +196,7 @@ export default function MultiTableTab() {
         )}
 
         {showUploadSlot ? (
-          <FileUpload
-            compact
-            onUploaded={handleDatasetUploaded}
-            accept=".csv,.xlsx,.xls"
-            label={`// ADD DATASET ${datasets.length + 1}`}
-            helperText="CSV, XLSX, XLS"
-          />
+          <DataSourcePicker datasetNumber={datasets.length + 1} onImported={handleDatasetUploaded} onImportedMany={handleDatasetsImported} />
         ) : (
           <button
             onClick={() => setShowUploadSlot(true)}

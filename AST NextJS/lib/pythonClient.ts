@@ -396,7 +396,40 @@ export interface CleanAgentResponse {
   applied?: boolean; // true if at least one safe change was applied
   reverted?: string[]; // plain-English summaries, e.g. "state: 1,267 existing values would have been blanked"
   keptChanges?: AgentKeptChange[];
+  newColumns?: string[]; // flag columns the agent added (their empty cells are not counted in nullValues)
   message?: string; // the one-line summary built from the verifier result
+  fill?: AgentFillSummary; // what the agent filled first, and the questions it could not answer itself
+  validators?: AgentValidatorSummary; // the deterministic value repairs that ran after the fill (no model involved)
+}
+
+export interface AgentRepairExample {
+  row: number;
+  before: string | number | null;
+  after: string | number | null; // null = left blank
+}
+
+export interface AgentRepair {
+  column: string;
+  rule: string; // e.g. "impossible_negative", "future_date", "mixed_date_formats", "unit_in_text", "swapped_values"
+  action: string; // "blanked" | "converted" | "rescaled" | "parsed" | "swapped back" | "dropped" | ...
+  count: number;
+  evidence: string; // plain English: what in the table justified the repair
+  examples: AgentRepairExample[]; // at most three
+}
+
+export interface AgentValidatorSummary {
+  entries: AgentRepair[];
+  changed: number; // cells changed
+  rowsDropped: number;
+  kept?: boolean | null; // true = the repaired table is used for the user's questions
+}
+
+export interface AgentFillSummary {
+  filled: FilledColumn[];
+  skipped: SkippedColumn[]; // kind "no_evidence" = a question for the user (fill with "Unknown" or leave empty)
+  totalFilled: number;
+  remainingText: number;
+  kept?: boolean | null; // true = the filled table is used for the user's questions
 }
 
 export interface AgentKeptChange {
@@ -413,6 +446,148 @@ export function getCleaningReport(req: CleanRequest): Promise<CleanResponse> {
 
 export function getDataChecks(req: CleanRequest): Promise<DataChecksResponse> {
   return callPythonService<DataChecksResponse>("/data-checks", req, FILE_READ_TIMEOUT_MS);
+}
+
+export interface FillMissingRequest {
+  fileUrl: string;
+  filename: string;
+  sessionId: string;
+  unknown?: boolean; // also label every text blank nothing in the file can fill with "Unknown"
+  unknownColumns?: string[]; // label just these columns' text blanks "Unknown" (the user's per-column answer)
+}
+
+export interface FilledColumn {
+  column: string;
+  count: number;
+  method: "inferred" | "median" | "text" | "derived";
+  value: number | string;
+  from?: string; // for "inferred": the column that proved the value
+}
+
+export interface SkippedColumn {
+  column: string;
+  count: number;
+  reason: string;
+  kind?: string; // "no_evidence" for blanks nothing in the file can fill
+  numeric?: boolean; // true for a number column: it cannot be filled with "Unknown", so it is shown as a note
+}
+
+export interface FillMissingResponse {
+  success: boolean;
+  filename?: string;
+  before?: { rows: number; columns: number; nullValues: number };
+  after?: { rows: number; columns: number; nullValues: number };
+  filled?: FilledColumn[];
+  skipped?: SkippedColumn[];
+  remainingText?: number; // text blanks left because nothing in the file tells us the value
+  message?: string;
+  error?: string;
+}
+
+// Deterministic fill of the remaining blanks (no model): the column median for numbers, "Unknown" for text.
+export function fillMissing(req: FillMissingRequest): Promise<FillMissingResponse> {
+  return callPythonService<FillMissingResponse>("/clean/fill", req, FILE_READ_TIMEOUT_MS);
+}
+
+// ── Audit trail: every change the pipeline made, row by row (audit_service.py) ──────────────────────────────────────
+export interface AuditEntry {
+  stage: string;
+  rule: string;
+  action: "changed" | "blanked" | "filled" | "removed";
+  row: number; // the row in the user's file as a spreadsheet shows it (header = row 1)
+  key: string;
+  column: string | null;
+  before: string;
+  after: string;
+}
+
+export interface AuditRuleRow {
+  stage: string;
+  rule: string;
+  action: string;
+  column: string | null;
+  count: number;
+  evidence: string;
+}
+
+export interface AuditDuplicateGroup {
+  rows: number[];
+  count: number;
+  values: Record<string, string>;
+}
+
+export interface AuditSummary {
+  scope: "clean" | "agent";
+  filename: string;
+  stages: string[];
+  totals: {
+    cellsChanged: number;
+    cellsBlanked: number;
+    cellsFilled: number;
+    rowsRemoved: number;
+    rowsTouched: number;
+    rowsRaw: number;
+    rowsFinal: number;
+    columnsDropped: string[];
+    columnsAdded: string[];
+  };
+  byRule: AuditRuleRow[];
+  conversions: { stage: string; column: string; count: number; to: string }[];
+  unexplained: { count: number; examples: { row: number; column: string | null; before: string; after: string }[]; checked: boolean; reason: string };
+  duplicates: { groups: number; rows: number; extra: number; sample: AuditDuplicateGroup[] };
+  entryCount: number;
+  truncated: boolean;
+  notes: string[];
+}
+
+export interface AuditRequest {
+  fileUrl: string;
+  filename: string;
+  sessionId: string;
+  scope?: "clean" | "agent";
+  offset?: number;
+  limit?: number;
+  rule?: string;
+  column?: string;
+  action?: string;
+  q?: string;
+  refresh?: boolean;
+}
+
+export interface AuditResponse {
+  success: boolean;
+  summary?: AuditSummary;
+  total?: number;
+  offset?: number;
+  entries?: AuditEntry[];
+  error?: string;
+}
+
+export interface RemoveDuplicatesResponse {
+  success: boolean;
+  removed?: number;
+  rows?: number;
+  message?: string;
+  error?: string;
+}
+
+export function getAudit(req: AuditRequest): Promise<AuditResponse> {
+  return callPythonService<AuditResponse>("/clean/audit", req, FILE_READ_TIMEOUT_MS);
+}
+
+export async function getAuditCsv(req: AuditRequest): Promise<string> {
+  const res = await fetch(`${PYTHON_SERVICE_URL}/clean/audit/csv`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Service-Secret": PYTHON_SERVICE_SECRET ?? "" },
+    body: JSON.stringify(req),
+    signal: AbortSignal.timeout(FILE_READ_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`Python service error (${res.status})`);
+  return res.text();
+}
+
+export function removeDuplicates(req: { fileUrl: string; filename: string; sessionId: string }): Promise<RemoveDuplicatesResponse> {
+  return callPythonService<RemoveDuplicatesResponse>("/clean/duplicates", req, FILE_READ_TIMEOUT_MS);
 }
 
 // LIVE BUG: a 5-sheet, 18MB workbook (hotel_revenue_historical_full-2.xlsx,
@@ -594,4 +769,58 @@ const MULTI_TABLE_TIMEOUT_MS = 90_000;
 
 export function runMultiTableQuery(req: MultiTableQueryRequest): Promise<MultiTableQueryResponse> {
   return callPythonService<MultiTableQueryResponse>("/multi-table/query", req, MULTI_TABLE_TIMEOUT_MS);
+}
+
+// ── Data connectors (Join SQL Analysis: Google Drive / MySQL) ────────────────
+// Both import the data into the backend's local storage and return the same
+// {url: "local://<id>", filename} an upload does, so the dataset joins the
+// multi-table query like any uploaded file. See AST 2.0/data_connectors.py.
+
+export interface ConnectorImportedFile {
+  url: string;
+  filename: string;
+  bytes?: number;
+}
+
+export interface ConnectorSkippedFile {
+  name: string;
+  reason: string; // plain English: why this file was not imported
+}
+
+export interface ConnectorImportResponse {
+  success: boolean;
+  url?: string; // for a folder / several links this is the FIRST file, so older callers keep working
+  filename?: string;
+  files?: ConnectorImportedFile[]; // present for a folder link or several links
+  skipped?: ConnectorSkippedFile[];
+  count?: number;
+  bytes?: number;
+  rows?: number;
+  columns?: number;
+  truncated?: boolean;
+  note?: string;
+  error?: string;
+}
+
+export interface MySqlImportRequest {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+  table: string;
+  limit?: number;
+  ssl: boolean;
+  sessionId: string;
+}
+
+const CONNECTOR_TIMEOUT_MS = 60_000;
+const DRIVE_TIMEOUT_MS = 120_000; // a folder imports several files, one after another (the backend gives up on its own at 90 s)
+
+export function importFromGoogleDrive(req: { link: string; sessionId: string }): Promise<ConnectorImportResponse> {
+  return callPythonService<ConnectorImportResponse>("/connect/google-drive", req, DRIVE_TIMEOUT_MS);
+}
+
+export function importFromMySql(req: MySqlImportRequest): Promise<ConnectorImportResponse> {
+  return callPythonService<ConnectorImportResponse>("/connect/mysql", req, CONNECTOR_TIMEOUT_MS);
 }

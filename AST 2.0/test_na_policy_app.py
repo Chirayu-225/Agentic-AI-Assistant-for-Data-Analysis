@@ -130,13 +130,21 @@ def main():
     frame, out = run_with_bad_reread(lambda d: pd.concat([d.iloc[1:], d.iloc[:1]], ignore_index=True))
     check("shifted second read (same rows): the legacy frame comes back", frame.equals(legacy))
 
-    # Excel is untouched by the policy
+    # Excel: the safe policy now keeps a real "NA" like CSV does (test_excel_na.py has the details). A workbook with no
+    # NA token reads identically under both policies, and a workbook WITH one differs only in those cells.
     try:
+        xbuf = io.BytesIO()
+        pd.DataFrame({"t": ["EMEA", "APAC", "EMEA", "APAC"], "n": [1, 2, 3, 4]}).to_excel(xbuf, index=False)
+        xb = xbuf.getvalue()
+        check("Excel with no NA token: safe == legacy", file_reader._read_tabular_file_uncached(xb, "t.xlsx", na_policy="safe")
+              .equals(file_reader._read_tabular_file_uncached(xb, "t.xlsx")))
         xbuf = io.BytesIO()
         pd.DataFrame({"t": ["NA", "EMEA", "NA", "APAC"], "n": [1, 2, 3, 4]}).to_excel(xbuf, index=False)
         xb = xbuf.getvalue()
-        check("Excel: safe == legacy", file_reader._read_tabular_file_uncached(xb, "t.xlsx", na_policy="safe")
-              .equals(file_reader._read_tabular_file_uncached(xb, "t.xlsx")))
+        xs = file_reader._read_tabular_file_uncached(xb, "t.xlsx", na_policy="safe")
+        xl = file_reader._read_tabular_file_uncached(xb, "t.xlsx")
+        check("Excel with a real NA: safe keeps it, legacy reads it as missing; nothing else differs",
+              xs["t"].tolist() == ["NA", "EMEA", "NA", "APAC"] and xl["t"].isna().sum() == 2 and xs["n"].equals(xl["n"]))
     except ImportError:
         print("[SKIPPED] no Excel writer installed")
 

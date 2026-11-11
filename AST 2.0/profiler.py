@@ -500,6 +500,9 @@ def build_defect_fix_prompt(defects: list[dict], schema_text: str) -> str:
         "- ONLY add new boolean flag columns (for example sales_is_outlier), "
         "strip whitespace, normalize case in low-cardinality text columns, "
         "or parse text to numbers or dates when EVERY value parses.",
+        "- A flag column must be boolean with False (never empty/None/NaN) "
+        "for every row that is not flagged, e.g. df['x'] > 100 rather than "
+        "a column that is only filled in for the flagged rows.",
         "- Anything else — merging spelling variants, imputing, correcting "
         "an outlier, deciding what a blank means — is a human's decision. "
         "Leave that data unchanged and, on that defect's REASONING line, "

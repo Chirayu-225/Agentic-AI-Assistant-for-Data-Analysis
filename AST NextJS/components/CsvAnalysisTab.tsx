@@ -8,13 +8,15 @@ import InfoCards from "@/components/InfoCards";
 import SystemCapabilities from "@/components/SystemCapabilities";
 import DatasetProfile from "@/components/DatasetProfile";
 import CleaningReport from "@/components/CleaningReport";
-import CleaningAgentReport from "@/components/CleaningAgentReport";
+import CleaningAgentReport, { type FillChoice } from "@/components/CleaningAgentReport";
 import AutoAnalyzeReport from "@/components/AutoAnalyzeReport";
+import AuditDashboard from "@/components/AuditDashboard";
 import type {
   AnalyzeResponse,
   ProfileResponse,
   CleanResponse,
   CleanAgentResponse,
+  FillMissingResponse,
   AutoAnalyzeResponse,
   DataCheckCard,
 } from "@/lib/pythonClient";
@@ -45,6 +47,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
   const [cleaning, setCleaning] = useState<CleanResponse | null>(null);
   const [agentState, setAgentState] = useState<AgentState>("idle");
   const [agentReport, setAgentReport] = useState<CleanAgentResponse | null>(null);
+  const [fillChoices, setFillChoices] = useState<Record<string, FillChoice>>({});
   const [autoAnalyzeState, setAutoAnalyzeState] = useState<AgentState>("idle");
   const [autoAnalyzeReport, setAutoAnalyzeReport] = useState<AutoAnalyzeResponse | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
@@ -65,6 +68,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setCleaning(null);
       setAgentState("idle");
       setAgentReport(null);
+      setFillChoices({});
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
@@ -81,6 +85,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setCleaning(null);
       setAgentState("idle");
       setAgentReport(null);
+      setFillChoices({});
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
@@ -185,6 +190,32 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
     }
   }
 
+  // The user's answer to one of the agent's questions: fill that column's blanks with "Unknown", or leave them empty.
+  async function handleFillChoice(column: string, choice: "unknown" | "empty") {
+    if (!file) return;
+    if (choice === "empty") {
+      setFillChoices((prev) => ({ ...prev, [column]: "empty" }));
+      return;
+    }
+    setFillChoices((prev) => ({ ...prev, [column]: "working" }));
+    try {
+      const res = await fetch("/api/clean/fill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileUrl: file.url,
+          filename: file.filename,
+          sessionId: getOrCreateSessionId(),
+          unknownColumns: [column],
+        }),
+      });
+      const data = (await res.json()) as FillMissingResponse;
+      setFillChoices((prev) => ({ ...prev, [column]: data.success ? "unknown" : "failed" }));
+    } catch {
+      setFillChoices((prev) => ({ ...prev, [column]: "failed" }));
+    }
+  }
+
   async function handleRunAutoAnalyze() {
     if (!file) return;
     setAutoAnalyzeState("running");
@@ -273,26 +304,26 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
           {stage === "awaiting-clean-consent" && (
             <div className="border border-accent/40 rounded-lg bg-panel p-5">
               <p className="font-mono text-sm text-text mb-1">
-                Clean this dataset before analyzing it?
+                Rule-based cleaning always runs before your questions. Review what it changes first?
               </p>
               <p className="font-mono text-xs text-muted mb-4">
                 Deterministic, rule-based cleaning: normalizes column names and parses
-                currency, percentages and dates. Missing values are left blank, never
-                filled in. This changes the values you&apos;ll be querying — you can skip
-                it and query the raw data instead.
+                currency, percentages and dates. This step leaves missing values blank.
+                This cleaning is applied to your questions either way: Review shows you a report of
+                exactly what it changed, and Skip goes straight to your questions.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={handleConfirmClean}
                   className="px-4 py-2 rounded-md bg-accent text-base font-mono text-sm font-semibold"
                 >
-                  Clean Data
+                  Review cleaning
                 </button>
                 <button
                   onClick={handleSkipClean}
                   className="px-4 py-2 rounded-md border border-border font-mono text-sm text-muted"
                 >
-                  Skip — use raw data
+                  Skip the review
                 </button>
               </div>
             </div>
@@ -318,8 +349,10 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
                 The data quality agent looks for things pattern-matching structurally
                 can&apos;t — inconsistent category spellings (&quot;USA&quot; / &quot;U.S.&quot;),
                 implausible-but-not-malformed values, and meaningful missing values — then
-                proposes and applies fixes. This calls the LLM and may take longer than the
-                instant rule-based pass above.
+                proposes and applies fixes. It also fills the blanks your own file proves
+                (for example from other rows of the same customer) and asks you what to do
+                with the rest. This calls the LLM and may take longer than the instant
+                rule-based pass above.
               </p>
               <button
                 onClick={handleRunAgent}
@@ -334,7 +367,20 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
               ▸ Auditing dataset for data quality defects...
             </p>
           )}
-          {agentReport && <CleaningAgentReport report={agentReport} />}
+          {agentReport && (
+            <CleaningAgentReport report={agentReport} choices={fillChoices} onChoose={handleFillChoice} />
+          )}
+
+          {file && stage === "ready" && (
+            <AuditDashboard
+              key={agentReport ? "agent" : "clean"}
+              fileUrl={file.url}
+              filename={file.filename}
+              sessionId={getOrCreateSessionId()}
+              scope={agentReport ? "agent" : "clean"}
+            />
+          )}
+
 
           {/* User-triggered, same reasoning as the cleaning agent above —
               costs several LLM calls, so it never runs automatically. */}
