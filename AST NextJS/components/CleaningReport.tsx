@@ -15,6 +15,7 @@ function DeltaStat({
 }) {
   const changed = before !== after;
   const improved = lowerIsBetter ? after < before : after !== before;
+  const diff = after - before;
 
   return (
     <div className="border border-border rounded-lg bg-panel px-5 py-4">
@@ -24,15 +25,27 @@ function DeltaStat({
           {before.toLocaleString()}
         </p>
         <span className="text-muted text-sm">→</span>
-        <p className={`font-mono text-xl font-bold ${changed && improved ? "text-accent" : "text-text"}`}>
+        <p className={`font-mono text-xl font-bold transition-all ${changed && improved ? "text-accent" : "text-text"}`}>
           {after.toLocaleString()}
         </p>
+        {changed && (
+          <span className={`font-mono text-xs ${improved ? "text-accent" : "text-amber-400"}`}>
+            {diff < 0 ? "▼" : "▲"} {Math.abs(diff).toLocaleString()}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-export default function CleaningReport({ report }: { report: CleanResponse }) {
+// What the table looks like NOW, after the user's own choices (removing duplicate rows, filling blanks). Kept by the parent.
+export interface LiveStats {
+  rows: number;
+  nullValues: number;
+  events: string[];
+}
+
+export default function CleaningReport({ report, live }: { report: CleanResponse; live?: LiveStats | null }) {
   if (!report.success) {
     return (
       <div className="border border-red-900 bg-red-950/30 rounded-lg p-4 mb-6">
@@ -52,14 +65,25 @@ export default function CleaningReport({ report }: { report: CleanResponse }) {
 
       {before && after && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-          <DeltaStat label="ROWS" before={before.rows} after={after.rows} />
+          <DeltaStat label="ROWS" before={before.rows} after={live ? live.rows : after.rows} />
           <DeltaStat label="COLUMNS" before={before.columns} after={after.columns} />
           <DeltaStat
             label="NULL VALUES"
             before={before.nullValues}
-            after={after.nullValues}
+            after={live ? live.nullValues : after.nullValues}
             lowerIsBetter
           />
+        </div>
+      )}
+
+      {live && live.events.length > 0 && (
+        <div className="mb-5 border border-accent/30 rounded-md bg-base px-4 py-3">
+          <p className="font-mono text-[11px] text-accent tracking-widest mb-2">AFTER YOUR CHOICES</p>
+          <div className="flex flex-col gap-1 font-mono text-xs text-text">
+            {live.events.map((e, i) => (
+              <p key={i}>• {e}</p>
+            ))}
+          </div>
         </div>
       )}
 

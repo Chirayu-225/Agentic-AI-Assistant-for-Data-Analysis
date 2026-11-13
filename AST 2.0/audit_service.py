@@ -146,6 +146,10 @@ def remove_duplicates(content: bytes, filename: str, session_id: str, file_url: 
         new = base[~dup]                                   # index labels are kept: they are how rows are traced
         session_cache.put(session_id, file_url, filename, content, new)
     al.store_drop((session_id, file_url))
+    def _stats(d):
+        return {"rows": int(len(d)), "columns": int(len(d.columns)), "nullValues": int(d.isna().sum().sum())}
+    after_df = base[~dup] if removed else base
     return {"success": True, "removed": removed, "rows": int(len(base) - removed),
+            "before": _stats(base), "after": _stats(after_df),
             "message": (f"Removed {removed:,} repeated row{'s' if removed != 1 else ''}; the first copy of each stays. "
                         "The table without them is used for your questions.") if removed else "There were no repeated rows to remove."}

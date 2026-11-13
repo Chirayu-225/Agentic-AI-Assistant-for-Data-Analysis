@@ -114,9 +114,6 @@ export default function Sidebar({
         <StatRow label="CHAT_MODEL" value={health?.online ? prettyModel(health.models?.chat) : "—"} />
         <StatRow label="INFERENCE" value="GROQ API" />
         <StatRow label="EMBEDDINGS" value="LOCAL · CPU" />
-        {health?.online && health.sandboxMemoryCap === false && (
-          <StatRow label="SANDBOX_MEM_CAP" value="OFF (DEV)" valueClassName="text-yellow-500" />
-        )}
       </div>
 
       <div className="border-t border-border pt-4 flex flex-col gap-5">

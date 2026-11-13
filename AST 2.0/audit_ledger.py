@@ -268,32 +268,35 @@ class Ledger:
                     break
         kept_ids = apos.index
         full_b = None
-        if first_stage := (stage == "Rule cleaning"):
-            try:
-                full_b = pd.util.hash_pandas_object(before.astype(str), index=False).to_numpy()
-            except Exception:  # noqa: BLE001
-                full_b = None
+        first_stage = stage == "Rule cleaning"
+        try:
+            full_b = pd.util.hash_pandas_object(before.astype(str), index=False).to_numpy()
+        except Exception:  # noqa: BLE001
+            full_b = None
         hash_to_kept = {}
         key_to_kept = {}
-        if first_stage:
-            kp = bpos.loc[kept_ids].to_numpy() if len(kept_ids) else np.array([], dtype=int)
-            for pos, oid in zip(kp, kept_ids):
-                if full_b is not None:
-                    hash_to_kept.setdefault(int(full_b[pos]), int(oid))
-                if key_b is not None:
-                    key_to_kept.setdefault(str(before[key_b].iloc[pos]), int(oid))
+        kp = bpos.loc[kept_ids].to_numpy() if len(kept_ids) else np.array([], dtype=int)
+        for pos, oid in zip(kp, kept_ids):
+            if full_b is not None:
+                hash_to_kept.setdefault(int(full_b[pos]), int(oid))
+            if key_b is not None and first_stage:
+                key_to_kept.setdefault(str(before[key_b].iloc[pos]), int(oid))
         for oid in removed_ids:
             pos = int(bpos.loc[oid])
             rule, detail = reason or "Row removed", ""
-            if first_stage:
-                if full_b is not None and int(full_b[pos]) in hash_to_kept:
-                    rule, detail = "Exact duplicate removed", f"copy of row {hash_to_kept[int(full_b[pos])] + 2}"
-                elif key_b is not None and str(before[key_b].iloc[pos]) in key_to_kept:
+            if full_b is not None and int(full_b[pos]) in hash_to_kept:
+                rule = "Exact duplicate removed" if first_stage else "Exact duplicate removed (your choice)"
+                detail = f"copy of row {hash_to_kept[int(full_b[pos])] + 2}"
+            elif first_stage:
+                if key_b is not None and str(before[key_b].iloc[pos]) in key_to_kept:
                     rule = "Repeated record (same ID) removed"
                     detail = f"same {self.key_col} as row {key_to_kept[str(before[key_b].iloc[pos])] + 2}; the more complete copy was kept"
                 else:
                     rule = "Row removed by the cleaner"
-            key = _short(before[key_b].iloc[pos], 40) if key_b is not None else ""
+            if key_b is not None:
+                key = _short(before[key_b].iloc[pos], 40)
+            else:  # no ID column: show the start of the row so it can be recognised
+                key = " | ".join(t for t in (_short(v, 16) for v in before.iloc[pos].tolist()[:3]) if t)
             self.removed[int(oid)] = rule
             self.rows_touched.add(int(oid))
             self.counts[(stage, rule, "removed", None)] += 1

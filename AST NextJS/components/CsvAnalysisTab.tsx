@@ -7,7 +7,7 @@ import ResultDisplay from "@/components/ResultDisplay";
 import InfoCards from "@/components/InfoCards";
 import SystemCapabilities from "@/components/SystemCapabilities";
 import DatasetProfile from "@/components/DatasetProfile";
-import CleaningReport from "@/components/CleaningReport";
+import CleaningReport, { type LiveStats } from "@/components/CleaningReport";
 import CleaningAgentReport, { type FillChoice } from "@/components/CleaningAgentReport";
 import AutoAnalyzeReport from "@/components/AutoAnalyzeReport";
 import AuditDashboard from "@/components/AuditDashboard";
@@ -48,6 +48,8 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
   const [agentState, setAgentState] = useState<AgentState>("idle");
   const [agentReport, setAgentReport] = useState<CleanAgentResponse | null>(null);
   const [fillChoices, setFillChoices] = useState<Record<string, FillChoice>>({});
+  // The scorecard's "after" numbers once the user removes duplicate rows or fills blanks (null = nothing changed yet).
+  const [live, setLive] = useState<LiveStats | null>(null);
   const [autoAnalyzeState, setAutoAnalyzeState] = useState<AgentState>("idle");
   const [autoAnalyzeReport, setAutoAnalyzeReport] = useState<AutoAnalyzeResponse | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
@@ -69,6 +71,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAgentState("idle");
       setAgentReport(null);
       setFillChoices({});
+      setLive(null);
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
@@ -86,6 +89,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAgentState("idle");
       setAgentReport(null);
       setFillChoices({});
+      setLive(null);
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
       setResult(null);
@@ -166,10 +170,27 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
     setStage("ready");
   }
 
+  // Records one user choice's effect on the table: the new row / null counts and a plain-language line about it.
+  function applyLive(after: { rows: number; nullValues: number } | undefined, describe: (rowsDelta: number, nullsDelta: number) => string) {
+    if (!after) return;
+    setLive((prev) => {
+      const baseRows = prev?.rows ?? cleaning?.after?.rows ?? after.rows;
+      const baseNulls = prev?.nullValues ?? cleaning?.after?.nullValues ?? after.nullValues;
+      const line = describe(after.rows - baseRows, after.nullValues - baseNulls);
+      return { rows: after.rows, nullValues: after.nullValues, events: [...(prev?.events ?? []), line] };
+    });
+  }
+
+  function signed(n: number) {
+    return (n < 0 ? "−" : "+") + Math.abs(n).toLocaleString();
+  }
+
   async function handleRunAgent() {
     if (!file) return;
     setAgentState("running");
     setAgentReport(null);
+    setLive(null); // the agent rebuilds the working table, so the earlier choices no longer apply
+    setFillChoices({});
 
     try {
       const res = await fetch("/api/clean/agent", {
@@ -211,6 +232,9 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       });
       const data = (await res.json()) as FillMissingResponse;
       setFillChoices((prev) => ({ ...prev, [column]: data.success ? "unknown" : "failed" }));
+      if (data.success) {
+        applyLive(data.after, (_r, n) => `Filled the blanks in '${column}' with "Unknown": null values ${signed(n)}`);
+      }
     } catch {
       setFillChoices((prev) => ({ ...prev, [column]: "failed" }));
     }
@@ -333,7 +357,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
               ▸ Running cleaning engine...
             </p>
           )}
-          {cleaning && <CleaningReport report={cleaning} />}
+          {cleaning && <CleaningReport report={cleaning} live={live} />}
 
           {/* Gated on reaching "ready" (post clean/skip decision), NOT on
               nulls remaining — the agent looks for general data quality
@@ -378,6 +402,12 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
               filename={file.filename}
               sessionId={getOrCreateSessionId()}
               scope={agentReport ? "agent" : "clean"}
+              onDuplicatesRemoved={(r) => {
+                if (!r.removed) return;
+                applyLive(r.after, (rows, nulls) =>
+                  `Removed ${r.removed!.toLocaleString()} duplicate rows: rows ${signed(rows)}, null values ${signed(nulls)}`,
+                );
+              }}
             />
           )}
 

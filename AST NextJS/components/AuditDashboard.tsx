@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AuditEntry, AuditResponse, AuditSummary } from "@/lib/pythonClient";
+import type { AuditEntry, AuditResponse, AuditSummary, RemoveDuplicatesResponse } from "@/lib/pythonClient";
 
 const PAGE = 50;
 const ACTIONS = ["changed", "blanked", "filled", "removed"] as const;
@@ -40,7 +40,7 @@ export default function AuditDashboard({
   filename: string;
   sessionId: string;
   scope: "clean" | "agent";
-  onDuplicatesRemoved?: () => void;
+  onDuplicatesRemoved?: (result: RemoveDuplicatesResponse) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -146,7 +146,7 @@ export default function AuditDashboard({
         setDupMsg(data.error ?? "Could not remove the duplicates.");
       } else {
         setDupMsg(data.message ?? `Removed ${data.removed} duplicate rows.`);
-        onDuplicatesRemoved?.();
+        onDuplicatesRemoved?.(data as RemoveDuplicatesResponse);
         void load({ offset: 0, refresh: true });
       }
     } catch {

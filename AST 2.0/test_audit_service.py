@@ -87,12 +87,15 @@ S2, U2 = "sess2", "http://x/items.csv"
 L3, s3 = svc.build_audit(c2, "items.csv", S2, U2, "agent")
 check("kept identical rows are grouped with their file rows", s3["duplicates"]["groups"] >= 1 and s3["duplicates"]["extra"] >= 6, str(s3["duplicates"])[:300])
 out = svc.remove_duplicates(c2, "items.csv", S2, U2)
+check("the duplicate answer carries the table's counts before and after",
+      out["before"]["rows"] - out["after"]["rows"] == out["removed"] and out["after"]["rows"] == out["rows"]
+      and out["after"]["nullValues"] <= out["before"]["nullValues"], str(out))
 check("removing keeps the first copy of each and reports the count", out["success"] and out["removed"] > 0 and out["rows"] == len(rows) - out["removed"], str(out))
 wt = session_cache.get(S2, U2).cleaned_df
 check("the working table has no identical rows left", not wt.duplicated().any())
 L4, s4 = svc.build_audit(c2, "items.csv", S2, U2, "agent")
 rem = [e for e in L4.page(limit=500)["entries"] if e["action"] == "removed"]
-check("the removal is in the audit, as the user's choice, with its rows", len(rem) == out["removed"] and all("your request" in e["rule"].lower() or "Removed at your request" in e["rule"] for e in rem), str(rem[:2]))
+check("the removal is in the audit, as the user's choice, with its rows", len(rem) == out["removed"] and all("your choice" in e["rule"].lower() and e["after"].startswith("copy of row") and e["key"] for e in rem), str(rem[:2]))
 check("... and nothing is unexplained", s4["unexplained"]["count"] == 0, str(s4["unexplained"]))
 check("no identical rows are left in the summary", s4["duplicates"]["groups"] == 0, str(s4["duplicates"]))
 none = svc.remove_duplicates(c2, "items.csv", S2, U2)

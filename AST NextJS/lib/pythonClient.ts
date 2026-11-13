@@ -567,6 +567,8 @@ export interface RemoveDuplicatesResponse {
   success: boolean;
   removed?: number;
   rows?: number;
+  before?: { rows: number; columns: number; nullValues: number };
+  after?: { rows: number; columns: number; nullValues: number };
   message?: string;
   error?: string;
 }
