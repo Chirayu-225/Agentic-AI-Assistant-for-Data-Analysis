@@ -8,7 +8,7 @@ import InfoCards from "@/components/InfoCards";
 import SystemCapabilities from "@/components/SystemCapabilities";
 import DatasetProfile from "@/components/DatasetProfile";
 import CleaningReport, { type LiveStats } from "@/components/CleaningReport";
-import CleaningAgentReport, { type FillChoice } from "@/components/CleaningAgentReport";
+import CleaningAgentReport, { type FillChoice, type ScaleChoice } from "@/components/CleaningAgentReport";
 import AutoAnalyzeReport from "@/components/AutoAnalyzeReport";
 import AuditDashboard from "@/components/AuditDashboard";
 import type {
@@ -17,6 +17,7 @@ import type {
   CleanResponse,
   CleanAgentResponse,
   FillMissingResponse,
+  ScaleFixResponse,
   AutoAnalyzeResponse,
   DataCheckCard,
 } from "@/lib/pythonClient";
@@ -48,6 +49,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
   const [agentState, setAgentState] = useState<AgentState>("idle");
   const [agentReport, setAgentReport] = useState<CleanAgentResponse | null>(null);
   const [fillChoices, setFillChoices] = useState<Record<string, FillChoice>>({});
+  const [scaleChoices, setScaleChoices] = useState<Record<string, ScaleChoice>>({});
   // The scorecard's "after" numbers once the user removes duplicate rows or fills blanks (null = nothing changed yet).
   const [live, setLive] = useState<LiveStats | null>(null);
   const [autoAnalyzeState, setAutoAnalyzeState] = useState<AgentState>("idle");
@@ -71,6 +73,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAgentState("idle");
       setAgentReport(null);
       setFillChoices({});
+      setScaleChoices({});
       setLive(null);
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
@@ -89,6 +92,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       setAgentState("idle");
       setAgentReport(null);
       setFillChoices({});
+      setScaleChoices({});
       setLive(null);
       setAutoAnalyzeState("idle");
       setAutoAnalyzeReport(null);
@@ -191,6 +195,7 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
     setAgentReport(null);
     setLive(null); // the agent rebuilds the working table, so the earlier choices no longer apply
     setFillChoices({});
+    setScaleChoices({});
 
     try {
       const res = await fetch("/api/clean/agent", {
@@ -237,6 +242,35 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
       }
     } catch {
       setFillChoices((prev) => ({ ...prev, [column]: "failed" }));
+    }
+  }
+
+  // The user's answer to the x1000 question: divide those values by 1000, or keep them as they are.
+  async function handleScaleChoice(column: string, choice: "fix" | "keep") {
+    if (!file) return;
+    if (choice === "keep") {
+      setScaleChoices((prev) => ({ ...prev, [column]: "kept" }));
+      return;
+    }
+    setScaleChoices((prev) => ({ ...prev, [column]: "working" }));
+    try {
+      const res = await fetch("/api/clean/scale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileUrl: file.url,
+          filename: file.filename,
+          sessionId: getOrCreateSessionId(),
+          columns: [column],
+        }),
+      });
+      const data = (await res.json()) as ScaleFixResponse;
+      setScaleChoices((prev) => ({ ...prev, [column]: data.success ? "fixed" : "failed" }));
+      if (data.success && data.changed) {
+        applyLive(data.after, () => `Divided ${data.changed!.toLocaleString()} values in '${column}' by 1000 (they looked 1000× too large)`);
+      }
+    } catch {
+      setScaleChoices((prev) => ({ ...prev, [column]: "failed" }));
     }
   }
 
@@ -392,7 +426,13 @@ export default function CsvAnalysisTab({ file }: { file: UploadedFile | null }) 
             </p>
           )}
           {agentReport && (
-            <CleaningAgentReport report={agentReport} choices={fillChoices} onChoose={handleFillChoice} />
+            <CleaningAgentReport
+              report={agentReport}
+              choices={fillChoices}
+              onChoose={handleFillChoice}
+              scaleChoices={scaleChoices}
+              onScaleChoose={handleScaleChoice}
+            />
           )}
 
           {file && stage === "ready" && (

@@ -522,6 +522,11 @@ def _run_cleaning_agent(
         # Only now, with the response fully built, does the verified table become the working table: had building the
         # response failed, the user would have seen an error while a table was already stored.
         response.update(_keep_for_questions(on_applied, df_used, verdict))
+        try:  # a question for the user, never a change: whole-number columns with a few values exactly 1000x too large
+            from scale_review import find_scale_suspects
+            response["scaleReview"] = find_scale_suspects(df_used)
+        except Exception:
+            _log_detail("scale review failed", __import__("traceback").format_exc())
         return response
     except Exception:
         import traceback

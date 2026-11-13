@@ -1,9 +1,10 @@
 "use client";
 
-import type { CleanAgentResponse, DataQualityDefect } from "@/lib/pythonClient";
+import type { CleanAgentResponse, DataQualityDefect, ScaleReviewItem } from "@/lib/pythonClient";
 
 // The user's answer to one question from the agent: fill that column's blanks with "Unknown", or leave them empty.
 export type FillChoice = "unknown" | "empty" | "working" | "failed";
+export type ScaleChoice = "fixed" | "kept" | "working" | "failed";
 
 function DeltaStat({
   label,
@@ -197,14 +198,74 @@ function AgentRepairSection({ validators }: { validators: CleanAgentResponse["va
   );
 }
 
+function ScaleReviewSection({
+  items,
+  choices,
+  onChoose,
+}: {
+  items?: ScaleReviewItem[];
+  choices?: Record<string, ScaleChoice>;
+  onChoose?: (column: string, choice: "fix" | "keep") => void;
+}) {
+  if (!items || items.length === 0) return null;
+  return (
+    <>
+      <p className="font-mono text-[11px] text-[#FBBF24] tracking-widest mb-2">
+        PLEASE CHECK — THESE NUMBERS LOOK 1000× TOO LARGE
+      </p>
+      <div className="flex flex-col gap-2 mb-4">
+        {items.map((it) => {
+          const choice = choices?.[it.column];
+          const ex = it.examples
+            .map((e) => `${e.value.toLocaleString()}${e.row ? ` (row ${e.row})` : ""}`)
+            .join(", ");
+          return (
+            <div key={it.column} className="border border-[#FBBF24]/40 rounded-lg bg-[#FBBF24]/5 p-3">
+              <p className="font-mono text-xs text-text mb-1">
+                {it.column}: {it.count.toLocaleString()} value{it.count === 1 ? "" : "s"} are exact multiples of 1000
+                {it.typical !== null ? ` while most are around ${it.typical.toLocaleString()}` : ""}, e.g. {ex}.
+                A typo, or a real bulk order? Nothing in the file says.
+              </p>
+              {choice === "fixed" && <p className="font-mono text-xs text-accent">✓ divided by 1000, used for your questions</p>}
+              {choice === "kept" && <p className="font-mono text-xs text-muted">✓ kept as they are</p>}
+              {choice === "working" && <p className="font-mono text-xs text-accent animate-pulse">▸ applying...</p>}
+              {(choice === undefined || choice === "failed") && onChoose && (
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <button
+                    onClick={() => onChoose(it.column, "fix")}
+                    className="px-3 py-1.5 rounded-md bg-accent text-base font-mono text-xs font-semibold"
+                  >
+                    Divide by 1000
+                  </button>
+                  <button
+                    onClick={() => onChoose(it.column, "keep")}
+                    className="px-3 py-1.5 rounded-md border border-border text-text font-mono text-xs"
+                  >
+                    Keep as is
+                  </button>
+                  {choice === "failed" && <span className="font-mono text-xs text-red-400">could not apply, try again</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default function CleaningAgentReport({
   report,
   choices,
   onChoose,
+  scaleChoices,
+  onScaleChoose,
 }: {
   report: CleanAgentResponse;
   choices?: Record<string, FillChoice>;
   onChoose?: (column: string, choice: "unknown" | "empty") => void;
+  scaleChoices?: Record<string, ScaleChoice>;
+  onScaleChoose?: (column: string, choice: "fix" | "keep") => void;
 }) {
   if (!report.success) {
     return (
@@ -300,6 +361,7 @@ export default function CleaningAgentReport({
 
       <AgentRepairSection validators={report.validators} />
       <AgentFillSection fill={report.fill} choices={choices} onChoose={onChoose} />
+      <ScaleReviewSection items={report.scaleReview} choices={scaleChoices} onChoose={onScaleChoose} />
 
       {defects.length > 0 && (
         <>

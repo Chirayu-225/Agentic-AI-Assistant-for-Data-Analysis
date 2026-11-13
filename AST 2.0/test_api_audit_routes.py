@@ -59,5 +59,12 @@ check("duplicates endpoint ok", r.status_code == 200 and j.get("success") is Tru
 # The copy repeats its order_id, so the cleaner already removed it (an ID proves it is a copy): nothing is left to choose.
 check("no repeats left for the keep/remove choice", j.get("removed") == 0 and j.get("rows") == 60, str(j))
 
+
+r = c.post("/clean/scale", json=body)
+check("/clean/scale: no secret -> rejected", r.status_code in (401, 403), r.status_code)
+r = c.post("/clean/scale", json={**body, "columns": ["amount"]}, headers=H)
+check("/clean/scale ok, nothing to change on ordinary data", r.status_code == 200 and r.json().get("success") is True
+      and r.json().get("changed") == 0, r.text[:200])
+
 print("\nFAILED: " + ", ".join(FAIL) if FAIL else "\nAll checks passed.")
 sys.exit(1 if FAIL else 0)

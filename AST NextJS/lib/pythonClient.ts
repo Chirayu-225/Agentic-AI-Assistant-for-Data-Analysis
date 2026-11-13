@@ -400,6 +400,27 @@ export interface CleanAgentResponse {
   message?: string; // the one-line summary built from the verifier result
   fill?: AgentFillSummary; // what the agent filled first, and the questions it could not answer itself
   validators?: AgentValidatorSummary; // the deterministic value repairs that ran after the fill (no model involved)
+  scaleReview?: ScaleReviewItem[]; // columns with a few values exactly 1000x too large: a question, never a change
+}
+
+export interface ScaleReviewItem {
+  column: string;
+  count: number;
+  typical: number | null;
+  examples: { row: number | null; value: number; suggested: number }[];
+}
+
+export interface ScaleFixResponse {
+  success: boolean;
+  changed?: number;
+  before?: { rows: number; columns: number; nullValues: number };
+  after?: { rows: number; columns: number; nullValues: number };
+  message?: string;
+  error?: string;
+}
+
+export function scaleFix(req: { fileUrl: string; filename: string; sessionId: string; columns: string[] }): Promise<ScaleFixResponse> {
+  return callPythonService<ScaleFixResponse>("/clean/scale", req, FILE_READ_TIMEOUT_MS);
 }
 
 export interface AgentRepairExample {

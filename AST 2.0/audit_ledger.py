@@ -189,7 +189,16 @@ class Ledger:
         rules = rules or {}
 
         def rule_fn(col, action, b, a):
-            return rules.get((col, action)) or rules.get(col) or rules.get(colkey(col)) or default_rule or stage
+            named = rules.get((col, action)) or rules.get(col) or rules.get(colkey(col))
+            if named:
+                return named
+            if action == "changed":  # the user's "divide by 1000" answer (scale_review.py)
+                try:
+                    if float(b) >= 1000 and float(b) % 1000 == 0 and float(a) == float(b) / 1000:
+                        return "Divided by 1000 (your choice)"
+                except (TypeError, ValueError):
+                    pass
+            return default_rule or stage
 
         self._diff(stage, self._prev, after, self._prev_orig, a_orig, rule_fn=rule_fn, removed_reason=removed_reason,
                    evidence=evidence or {})

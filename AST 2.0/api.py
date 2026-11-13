@@ -51,6 +51,7 @@ from profile_service import get_profile, get_cleaning_report
 from cleaning_agent import run_cleaning_agent
 from fill_service import run_fill
 import audit_service
+import scale_service
 from auto_analyze_service import run_auto_analyze, answer_followup
 from multi_table_service import run_multi_table_query
 import session_cache
@@ -218,6 +219,10 @@ class FillRequest(CleanAgentRequest):
     # also label the text blanks nothing in the file can fill with "Unknown" (a separate, explicit click)
     unknown: bool = False
     unknownColumns: list[str] = []      # label just these columns' text blanks "Unknown" (the user's per-column answer)
+
+
+class ScaleRequest(CleanAgentRequest):
+    columns: list[str] = []             # the columns the user said to divide by 1000 (the values are re-found server side)
 
 
 class AuditRequest(CleanAgentRequest):
@@ -623,6 +628,23 @@ def clean_fill(req: FillRequest, x_service_secret: str = Header(default="")):
     try:
         return scrub_result(run_fill(content, req.filename, req.sessionId, req.fileUrl, unknown=req.unknown,
                                   unknown_columns=req.unknownColumns))
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.post("/clean/scale")
+def clean_scale(req: ScaleRequest, x_service_secret: str = Header(default="")):
+    # The user's "yes" to the x1000 question: divides the values that are exactly 1000x too large by 1000 in the working
+    # table. Explicit click only; no model is involved.
+    _check_secret(x_service_secret)
+    _limit("light", req.sessionId, req.sessionId, req.filename)
+
+    content, err = _fetch_blob(req.fileUrl)
+    if err is not None:
+        return err
+
+    try:
+        return scrub_result(scale_service.run_scale_fix(content, req.filename, req.sessionId, req.fileUrl, req.columns))
     except Exception as e:
         return _server_error(e)
 
