@@ -45,23 +45,23 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from analysis_service import run_analysis, run_analysis_from_cleaned_df
-from rag_service import index_document, answer_question, get_insights
-from profile_service import get_profile, get_cleaning_report
-from cleaning_agent import run_cleaning_agent
-from fill_service import run_fill
-import audit_service
-import scale_service
-from auto_analyze_service import run_auto_analyze, answer_followup
-from multi_table_service import run_multi_table_query
-import session_cache
-from error_scrub import scrub_result
-import audit_log
-import cache_layer
-import rate_limiter
-import local_store
-import data_connectors
-from llm_provider import usage_stats as llm_usage_stats
+from analysis.analysis_service import run_analysis, run_analysis_from_cleaned_df
+from rag.rag_service import index_document, answer_question, get_insights
+from analysis.profile_service import get_profile, get_cleaning_report
+from data_cleaning.cleaning_agent import run_cleaning_agent
+from data_cleaning.fill_service import run_fill
+from audit import audit_service
+from data_cleaning import scale_service
+from analysis.auto_analyze_service import run_auto_analyze, answer_followup
+from analysis.multi_table_service import run_multi_table_query
+from storage import session_cache
+from security.error_scrub import scrub_result
+from audit import audit_log
+from storage import cache_layer
+from security import rate_limiter
+from storage import local_store
+from ingestion import data_connectors
+from llm.llm_provider import usage_stats as llm_usage_stats
 
 SERVICE_SECRET = os.environ.get("PYTHON_SERVICE_SECRET", "")
 
@@ -84,19 +84,17 @@ FETCH_TIMEOUT_SECONDS = 120
 app = FastAPI(title="Analyst Assistant API")
 
 # Say loudly, once, when generated code will run WITHOUT a memory cap.
-# The cap relies on Unix's resource.setrlimit; on Windows it is skipped,
-# so a runaway computation can use all of the machine's memory. Fine for
-# local development; production must run on Linux (or WSL/Docker locally).
+# The cap is Unix resource.setrlimit, or a Job Object on Windows (see
+# sandbox_limits._apply_windows_job_limits); the OS enforces both.
 try:
-    from sandbox_limits import _HAS_RESOURCE as _SANDBOX_HAS_MEMORY_CAP
+    from execution.sandbox_limits import HAS_MEMORY_CAP as _SANDBOX_HAS_MEMORY_CAP
 except Exception:
     _SANDBOX_HAS_MEMORY_CAP = False
 if not _SANDBOX_HAS_MEMORY_CAP:
     print(
         "[api] WARNING: sandbox memory limit is NOT enforced on this platform "
-        "(no Unix 'resource' module, e.g. native Windows). Generated code can use "
-        "unlimited memory. Run the backend under Linux, WSL or Docker for the "
-        "production-equivalent sandbox.",
+        "(neither Unix 'resource' nor a Windows Job Object is available). Generated "
+        "code can use unlimited memory.",
         flush=True,
     )
 
@@ -436,7 +434,7 @@ def health():
     # deliberately requires no secret, since it reveals nothing sensitive.
     # Model names are reported so the UI shows what is really configured
     # (they can be changed via GROQ_CODE_MODEL / GROQ_CHAT_MODEL).
-    import llm_provider
+    from llm import llm_provider
     return {
         "status": "ok",
         "models": {"code": llm_provider._CODE_MODEL, "chat": llm_provider._CHAT_MODEL},
@@ -553,9 +551,9 @@ def _data_checks_payload(content: bytes, filename: str) -> dict:
     """Parse and clean exactly as /clean does (same reader, same cached cleaned
     table), then run the deterministic checks. Raises on any failure; the route
     turns that into a fixed message so no exception text reaches the client."""
-    from file_reader import read_tabular_file
-    from cleaning import rule_based_clean
-    import data_checks
+    from ingestion.file_reader import read_tabular_file
+    from data_cleaning.cleaning import rule_based_clean
+    from data_cleaning import data_checks
 
     df_raw = read_tabular_file(content, filename)
     df_clean, _log = cache_layer.cached_rule_clean(df_raw, content, rule_based_clean)
