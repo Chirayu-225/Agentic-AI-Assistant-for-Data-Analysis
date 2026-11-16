@@ -40,6 +40,10 @@ DAILY_429 = ("Error code: 429 - {'error': {'message': 'Rate limit reached for mo
 
 def reset():
     lp._usage.update(day=lp._today(), calls=0)
+    # Each scenario below is independent: clear the circuit breaker (llm/resilience.py), which
+    # otherwise remembers the previous scenario's failures. Breaker behaviour has its own test.
+    from llm import resilience
+    resilience.reset_breakers()
     sleeps = []
     lp.time.sleep = lambda s: sleeps.append(s)
     return sleeps

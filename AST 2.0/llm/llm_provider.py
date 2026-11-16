@@ -21,6 +21,14 @@ FALLBACK (optional): any OpenAI-compatible /chat/completions endpoint.
         FALLBACK_CHAT_MODEL     model for the CHAT slot (defaults to CODE)
     Uses plain HTTP via `requests`, so no extra SDK is needed.
 
+    GEMINI PRESET: setting only GEMINI_API_KEY (free key from Google AI
+    Studio) makes Gemini the fallback through Google's OpenAI-compatible
+    endpoint. Optional: GEMINI_MODEL (or GEMINI_CODE_MODEL / GEMINI_CHAT_MODEL),
+    GEMINI_BASE_URL. Explicit FALLBACK_* settings win over the preset.
+
+RESILIENCE (llm/resilience.py): a circuit breaker per provider skips one that
+keeps failing, and every call respects the request's deadline.
+
 DAILY CAP: LLM_DAILY_CALL_LIMIT (default 400) caps real model calls per
 UTC day across ALL users, so a public demo can pause but can never drain
 the Groq quota. Cached answers don't count. The count is kept in
@@ -45,6 +53,8 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
+
+from llm import resilience
 
 _CODE_MODEL = os.environ.get("GROQ_CODE_MODEL", "openai/gpt-oss-20b")
 _CHAT_MODEL = os.environ.get("GROQ_CHAT_MODEL", "openai/gpt-oss-120b")
@@ -123,6 +133,7 @@ def _call_groq(prompt: str, temperature: float, model: str, max_tokens: int) -> 
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=resilience.call_timeout(90),   # never longer than the request has left
         **kwargs,
     )
     choice = resp.choices[0]
@@ -148,17 +159,42 @@ def _fallback_model(slot: str) -> str | None:
     return code or None
 
 
-def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) -> str:
-    import requests
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def _fallback_config(slot: str) -> tuple[str, str, str] | None:
+    """(base URL, API key, model) of the second provider for this slot, or
+    None. Explicit FALLBACK_* settings first, then the Gemini preset."""
     base = os.environ.get("FALLBACK_LLM_BASE_URL", "").rstrip("/")
     key = os.environ.get("FALLBACK_LLM_API_KEY", "")
     model = _fallback_model(slot)
+    if base and key and model:
+        return base, key, model
+    gkey = os.environ.get("GEMINI_API_KEY", "")
+    if gkey:
+        default = os.environ.get("GEMINI_MODEL", "") or GEMINI_DEFAULT_MODEL
+        gmodel = os.environ.get("GEMINI_CHAT_MODEL" if slot == "chat" else "GEMINI_CODE_MODEL", "") or default
+        return (os.environ.get("GEMINI_BASE_URL", "") or GEMINI_BASE_URL).rstrip("/"), gkey, gmodel
+    return None
+
+
+def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) -> str:
+    import requests
+    base, key, model = _fallback_config(slot)  # type: ignore[misc]
+    body = {"model": model, "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature, "max_tokens": max_tokens}
+    if model.startswith("gemini"):
+        # Gemini models think before answering and the hidden thinking counts
+        # against max_tokens; keep it low so the answer is not crowded out.
+        effort = os.environ.get("GEMINI_REASONING_EFFORT", "low")
+        if effort:
+            body["reasoning_effort"] = effort
     resp = requests.post(
         f"{base}/chat/completions",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}],
-              "temperature": temperature, "max_tokens": max_tokens},
-        timeout=90,
+        json=body,
+        timeout=resilience.call_timeout(90),
     )
     resp.raise_for_status()
     body = resp.json()
@@ -173,8 +209,7 @@ def _call_fallback(prompt: str, temperature: float, slot: str, max_tokens: int) 
 
 
 def fallback_configured() -> bool:
-    return bool(os.environ.get("FALLBACK_LLM_BASE_URL") and os.environ.get("FALLBACK_LLM_API_KEY")
-                and _fallback_model("code"))
+    return _fallback_config("code") is not None
 
 
 # ── Daily usage cap ───────────────────────────────────────────────────────────
@@ -338,7 +373,8 @@ def _call_primary(prompt: str, temperature: float, model: str, max_tokens: int) 
             if not _is_rate_limit(exc):
                 raise
             wait = _retry_after_seconds(exc)
-            if wait is not None and wait <= _MAX_RETRY_WAIT_S and attempt < _MAX_RATE_RETRIES:
+            if (wait is not None and wait <= _MAX_RETRY_WAIT_S and attempt < _MAX_RATE_RETRIES
+                    and wait + 0.5 < resilience.remaining()):   # never sleep past the request's deadline
                 attempt += 1
                 print(f"[llm] rate limited on {model}; waiting {wait:.1f}s "
                       f"(retry {attempt}/{_MAX_RATE_RETRIES})", flush=True)
@@ -354,22 +390,54 @@ def _call_primary(prompt: str, temperature: float, model: str, max_tokens: int) 
 def _call(prompt: str, temperature: float, model: str, max_tokens: int = 2048) -> str:
     """Primary call, then the optional fallback provider. Raises only if
     every configured provider failed — callers handle that."""
+    resilience.check_deadline()          # an expired request starts no new model call
     _reserve_call()
     slot = "chat" if model == _CHAT_MODEL else "code"
-    try:
-        return _call_primary(prompt, temperature, model, max_tokens)
-    except Exception as primary_error:
-        if isinstance(primary_error, ProviderRateLimited):
-            _refund_call()  # the provider rejected it; nothing was spent
+    primary = resilience.breaker("primary")
+    primary_error: Exception
+    if not primary.allow():
+        # The primary has failed repeatedly: do not spend this request's time on it.
         if not fallback_configured():
-            raise
-        print(f"[llm] primary ({model}) failed: {primary_error} — trying fallback provider", flush=True)
+            _refund_call()
+            raise resilience.ProviderUnavailable(
+                "The AI provider is temporarily unavailable. Please try again in "
+                f"{_human_wait(max(primary.retry_in(), 1))}.")
+        primary_error = RuntimeError("skipped: its circuit is open after repeated failures")
+    else:
+        # A call squeezed by an almost-spent deadline says nothing about the provider's health.
+        squeezed = resilience.call_timeout(90) < 15
         try:
-            return _call_fallback(prompt, temperature, slot, max_tokens)
-        except Exception as fallback_error:
-            raise RuntimeError(
-                f"primary failed ({primary_error}); fallback failed ({fallback_error})"
-            ) from fallback_error
+            text = _call_primary(prompt, temperature, model, max_tokens)
+            primary.record_success()
+            return text
+        except resilience.DeadlineExceeded:
+            raise
+        except Exception as e:
+            primary_error = e
+            if isinstance(e, ProviderRateLimited):
+                _refund_call()  # the provider rejected it; nothing was spent
+                primary.record_failure(cooldown=max(e.retry_after or 900.0, 60.0) if e.daily else None)
+            elif squeezed:
+                primary.release_trial()   # neither a success nor a failure
+            else:
+                primary.record_failure()
+            if not fallback_configured():
+                raise
+    print(f"[llm] primary ({model}) failed: {primary_error} — trying fallback provider", flush=True)
+    resilience.check_deadline()
+    secondary = resilience.breaker("fallback")
+    if not secondary.allow():
+        raise RuntimeError(f"primary failed ({primary_error}); fallback failed (skipped: its circuit is open)")
+    try:
+        text = _call_fallback(prompt, temperature, slot, max_tokens)
+    except Exception as fallback_error:
+        secondary.record_failure()
+        raise RuntimeError(
+            f"primary failed ({primary_error}); fallback failed ({fallback_error})"
+        ) from fallback_error
+    secondary.record_success()
+    resilience.note_fallback_used()
+    return text
 
 
 # ── Code-generation cache (replaces st.cache_data) ────────────────────────────
@@ -420,6 +488,8 @@ def llm_code_call(prompt_text: str, temperature: float = 0.1, session_id: str = 
     """Code generation (analysis, cleaning, retry). Cached per session."""
     try:
         return cached_llm_call(_CODE_MODEL, prompt_text, temperature, session_id, max_tokens)
+    except (resilience.DeadlineExceeded, resilience.ProviderUnavailable):
+        raise   # already a clear, user-safe message
     except Exception as e:
         raise RuntimeError(f"LLM code call failed: {e}") from e
 
@@ -428,6 +498,8 @@ def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
     """Natural-language work (insights, explanations, RAG answers). Never cached."""
     try:
         return _call(prompt_text, temperature, _CHAT_MODEL, max_tokens=4096)
+    except (resilience.DeadlineExceeded, resilience.ProviderUnavailable):
+        raise
     except Exception as e:
         raise RuntimeError(f"LLM chat call failed: {e}") from e
 
@@ -436,6 +508,8 @@ def llm_uncached_code_call(prompt_text: str, temperature: float = 0.0, max_token
     """One-shot code calls that must NOT be cached (cleaning retry, error retry)."""
     try:
         return _call(prompt_text, temperature, _CODE_MODEL, max_tokens)
+    except (resilience.DeadlineExceeded, resilience.ProviderUnavailable):
+        raise
     except Exception as e:
         raise RuntimeError(f"LLM uncached code call failed: {e}") from e
 

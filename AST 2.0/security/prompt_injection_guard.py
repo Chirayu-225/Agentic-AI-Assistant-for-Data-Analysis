@@ -73,6 +73,16 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
 _MARKER_RE = re.compile(r"=+\s*(BEGIN|END)\s+UNTRUSTED\s+DATA[^\n]*", re.IGNORECASE)
 
 
+def _undisguise(text: str) -> str:
+    """Undo the Unicode tricks that hide a forged marker from a plain regex:
+    full-width look-alikes (NFKC folds them to ASCII) and invisible format
+    characters such as zero-width spaces and soft hyphens (category Cf).
+    Found by the adversarial suite, cases I05, I06 and I10."""
+    import unicodedata
+    text = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
 def scan_for_injection(text: str) -> list[str]:
     """Returns the list of matched phrase patterns (as their matched
     text), empty if none found. Purely diagnostic — see module docstring
@@ -114,6 +124,16 @@ def wrap_untrusted(text: str, source_label: str) -> str:
     # already inside the content is defanged.
     tag = secrets.token_hex(4)
     safe_text = _MARKER_RE.sub("[marker-like text removed]", text)
+    # A marker can be disguised so the regex above misses it while a model
+    # still reads it as a marker. Only when that is the case is the text
+    # normalised (ordinary data keeps its exact spelling, which filters need).
+    if _MARKER_RE.search(_undisguise(safe_text)):
+        safe_text = _MARKER_RE.sub("[marker-like text removed]", _undisguise(safe_text))
+        try:
+            from audit import audit_log
+            audit_log.record("injection_detected", source=source_label, matches=1, disguised_marker=True)
+        except Exception:
+            pass
     return (
         f"=== BEGIN UNTRUSTED DATA {tag} ({source_label}) ===\n"
         f"{safe_text}\n"

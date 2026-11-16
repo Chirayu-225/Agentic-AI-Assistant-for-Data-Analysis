@@ -34,15 +34,15 @@
 | EXP01 | ok | verified_correct | query_plan | How many unique expense claims are there? | 300 | 300 |
 | EXP02 | ok | verified_correct | query_plan | What is the net total of all expenses including refunds? | 1201775.11 | 1.20178e+06 |
 | EXP03 | ok | verified_correct | query_plan | How many refunds (negative amounts) are there? | 26 | 26 |
-| EXP04 | ok | verified_correct | query_plan | Which department has the highest net expense total? | Sales | table[1 rows] [{"department": "Sales", "total": 407239.9000000001}] |
+| EXP04 | ok | verified_correct | query_plan | Which department has the highest net expense total? | Sales | table[1 rows] [{"department": "Sales", "total": 407239.9}] |
 | EXP05 | ok | verified_correct | query_plan | What is the average expense amount, excluding refunds? | 4508.73 | 4508.73 |
-| EXP06 | ok | verified_correct | query_plan | Which expense category has the largest net total? | Travel | table[1 rows] [{"category": "Travel", "total": 409739.1499999999}] |
+| EXP06 | ok | verified_correct | query_plan | Which expense category has the largest net total? | Travel | table[1 rows] [{"category": "Travel", "total": 409739.15}] |
 | EXP07 | ok | verified_correct | query_plan | How many distinct employees submitted expenses? | 60 | 60 |
 | EXP08 | ok | verified_correct | query_plan | What is the largest single expense? | 15871.31 | 15871.3 |
 | EXP09 | ok | verified_correct | query_plan | What is the net Travel spend in the Sales department? | 128141.96 | 128142 |
 | EXP10 | ok | verified_correct | query_plan | How many expenses were submitted in May 2026? | 73 | 73 |
 | EXP11 | ok | unverified_correct | generated_python | What percentage of net spend is Software? | 18.1 | 18.0617 |
-| EXP12 | ok | verified_correct | query_plan | List departments ranked by net expense total, highest first | Sales/Engineering/Operations/Finance | table[4 rows] [{"department": "Sales", "net_expense": 407239.9000000001}, {"department": " |
+| EXP12 | ok | verified_correct | query_plan | List departments ranked by net expense total, highest first | Sales/Engineering/Operations/Finance | table[4 rows] [{"department": "Sales", "net_expense": 407239.9}, {"department": "Engineeri |
 | EXP13 | ok | verified_correct | query_plan | Show all refunds | 26 | 26 rows |
 | EXP14 | ok | unverified_correct | generated_python | Plot net expense total by department as a bar chart |  | [chart] |
 
@@ -56,12 +56,12 @@
 | INV01 | ok | verified_correct | query_plan | How many invoices are there? | 400 | 400 |
 | INV02 | ok | unverified_correct | shortcut | What is the total invoiced amount? | 13748034.32 | 1.3748e+07 |
 | INV03 | ok | verified_correct | query_plan | What is the average invoice amount? | 34370.09 | 34370.1 |
-| INV04 | ok | verified_correct | query_plan | Which region has the highest total invoiced amount? | North | table[1 rows] [{"region": "North", "total_amount": 4853917.909999996}] |
-| INV05 | ok | verified_correct | query_plan | List regions ranked by total invoiced amount, highest first | North/South/East/West | table[4 rows] [{"region": "North", "total_amount": 4853917.909999996}, {"region": "South", |
+| INV04 | ok | verified_correct | query_plan | Which region has the highest total invoiced amount? | North | table[1 rows] [{"region": "North", "total_amount": 4853917.91}] |
+| INV05 | ok | verified_correct | query_plan | List regions ranked by total invoiced amount, highest first | North/South/East/West | table[4 rows] [{"region": "North", "total_amount": 4853917.91}, {"region": "South", "total |
 | INV06 | ok | verified_correct | query_plan | How many distinct regions are there? | 4 | 4 |
 | INV07 | ok | verified_correct | query_plan | How many invoices are overdue? | 65 | 65 |
 | INV08 | ok | verified_correct | query_plan | What is the total amount of overdue invoices? | 2292162.28 | 2.29216e+06 |
-| INV09 | ok | verified_correct | query_plan | Which customer segment has the highest average invoice amount? | Enterprise | table[1 rows] [{"segment": "Enterprise", "avg_amount": 86990.49878048782}] |
+| INV09 | ok | verified_correct | query_plan | Which customer segment has the highest average invoice amount? | Enterprise | table[1 rows] [{"segment": "Enterprise", "avg_amount": 86990.4987804878}] |
 | INV10 | ok | unverified_correct | generated_python | What percentage of total invoiced amount comes from the Enterprise seg | 51.9 | 51.8854 |
 | INV11 | ok | verified_correct | query_plan | What is the median days to pay for paid invoices? | 42.0 | 42 |
 | INV12 | ok | verified_correct | query_plan | How many invoices have no days_to_pay value? | 113 | 113 |
