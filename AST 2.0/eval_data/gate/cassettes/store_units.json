@@ -1,0 +1,143 @@
+{
+ "entries": {
+  "028e46dbb02a4a9b6567b785e0cfb8f1": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['city', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Calculate annual total per store\nannual_total = df[['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']].sum(axis=1)\n# Add to dataframe\ndf = df.assign(annual_total=annual_total)\n# Group by city and sum totals\ncity_totals = df.groupby('city', as_index=False)['annual_total'].sum()\n# Sort descending and take top 3\nresult = city_totals.sort_values('annual_total', ascending=False).head(3)"
+   ]
+  },
+  "3428695cf8b0c9e56a7b199646bc950c": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "3c11a0ef6d19ff60bf92777ede31bb88": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "3c5fa20928acfefdce9db95c39a7c51d": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"sum\",\"column\":\"mar\",\"as\":\"total\"}]}"
+   ]
+  },
+  "4c20e5925809f4a3c67c97c69e131a16": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count_distinct\",\"column\":\"store_id\",\"as\":\"store_count\"}]}"
+   ]
+  },
+  "6332e39536b378129c34f4d626e85387": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify month columns exist\nmonths = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']\nfor col in months:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Calculate total units sold per month\nmonthly_totals = df[months].sum()\n# Find month with highest total\nresult = monthly_totals.idxmax()\n"
+   ]
+  },
+  "65799f4d8eae449ceb2dad1c0332b305": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['city', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Filter Bengaluru stores\nbengaluru_df = df[df['city'] == 'Bengaluru']\n# Sum monthly columns\nmonthly_sum = bengaluru_df[['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']].sum()\n# Total annual units\nresult = monthly_sum.sum()"
+   ]
+  },
+  "65d126867dd2e6b4fb4c67f66fa23d7d": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['store_id', 'jan', 'feb', 'mar', 'apr', 'may', 'jun',\n                 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n\n# Calculate yearly total per store\nyearly_totals = df[required_cols[1:]].sum(axis=1)\n# Count stores with total > 10000\nresult = (yearly_totals > 10000).sum()\n"
+   ]
+  },
+  "6959250281ece2760f6a377986abd1e2": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "744bbd806666d7b927c0e0f2c9e2eba6": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "74f459f13c71ab2bbca1d4758bcf340a": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']\nfor col in required_months:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Compute average monthly units sold per store across all stores and months\nresult = df[required_months].mean().mean()"
+   ]
+  },
+  "785c267565a58c2f1b43e1d8245ebee7": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify columns exist\nfor col in ['jan', 'dec']:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Calculate totals\ntotal_jan = df['jan'].sum()\ntotal_dec = df['dec'].sum()\n# Calculate percentage increase\nresult = (total_dec - total_jan) / total_jan * 100.0"
+   ]
+  },
+  "7c5b7644a61ae3b8a30d074cc44d6f1f": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Count zeros across all month columns for each store\nzeros_per_store = (df[required_cols] == 0).sum(axis=1)\n# Total store-months with zero units sold\nresult = zeros_per_store.sum()\n"
+   ]
+  },
+  "7df1f85545b0f2993a0b76e7115dccce": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "859357dd27008524bfaf1aa595298cd2": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "8a872cc506b9972591921599e68185a5": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"store_id\"}],\"filters\":[{\"column\":\"city\",\"op\":\"=\",\"value\":\"Pune\"}]}"
+   ]
+  },
+  "8b1df2db7a6024bd4348143e54f0433b": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"store_count\"}],\"group_by\":[\"city\"],\"order_by\":[{\"by\":\"store_count\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  },
+  "975ee22dcc91394874c486ebc98c0a4d": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify month columns exist\nmonths = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']\nfor m in months:\n    if m not in df.columns:\n        raise ValueError('Column not found')\n# Calculate totals\ntotal_by_month = pd.DataFrame({'month': months, 'total_units': df[months].sum()})\n# Plot\nresult = px.bar(total_by_month, x='month', y='total_units')"
+   ]
+  },
+  "9c58f3c3f6417e54b74189d3dfde0023": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Sum of all months\ntotal_year = df[required_cols].sum(axis=1).sum()\n# Sum of Q4 months\nq4_total = df[['oct','nov','dec']].sum(axis=1).sum()\n# Percentage of Q4 sales\nresult = (q4_total / total_year) * 100\n"
+   ]
+  },
+  "a7553a74b87340c5e8e8a3868a6d6448": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify columns exist\nrequired_cols = ['store_id', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n# Sum yearly sales per store\nyearly = df.groupby('store_id')[['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']].sum()\nyearly['total'] = yearly.sum(axis=1)\n# Find store with maximum total\nmax_store = yearly['total'].idxmax()\nresult = max_store\n"
+   ]
+  },
+  "c6e58dfc25c175c879e35789b7d82a40": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "dbe5216a1223d5906ceacd0abc8486df": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "ff34881ff629aff9121278c1215da66d": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  }
+ },
+ "version": 1
+}

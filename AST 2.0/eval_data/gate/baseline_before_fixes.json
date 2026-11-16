@@ -1,0 +1,24 @@
+{
+ "suites": {
+  "expenses": {
+   "asked": 14,
+   "correct": 12,
+   "verified_wrong": 2
+  },
+  "invoices": {
+   "asked": 19,
+   "correct": 17,
+   "verified_wrong": 2
+  },
+  "sample_sales": {
+   "asked": 9,
+   "correct": 9,
+   "verified_wrong": 0
+  },
+  "store_units": {
+   "asked": 14,
+   "correct": 10,
+   "verified_wrong": 4
+  }
+ }
+}

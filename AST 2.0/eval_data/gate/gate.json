@@ -1,0 +1,8 @@
+{
+  "suites": [
+    {"name": "sample_sales", "dataset": "../sample_sales.csv", "questions": "../sample_questions.csv"},
+    {"name": "expenses", "dataset": "../heldout/expenses_dirty.csv", "questions": "../heldout/expenses_questions.csv"},
+    {"name": "invoices", "dataset": "../heldout/invoices_messy.csv", "questions": "../heldout/invoices_questions.csv"},
+    {"name": "store_units", "dataset": "../heldout/store_units_wide.xlsx", "questions": "../heldout/store_units_questions.csv"}
+  ]
+}

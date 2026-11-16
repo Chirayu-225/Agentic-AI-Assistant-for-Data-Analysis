@@ -68,6 +68,13 @@ Rules:
 - Output names given with "as" use letters, digits and underscores only and must not equal an existing column name.
 - If the question needs something this language cannot express (a chart, a join, a regression, a custom
   formula, anything else), reply exactly: {{"unsupported": true}}
+- Every condition in the question ("excluding ...", "only ...", "net", "above ...", "in 2024") must become a
+  filter. If a condition cannot be written as a filter on the listed columns and values, reply
+  {{"unsupported": true}}. Never drop a condition.
+- An aggregate works DOWN one column. If the answer needs several columns of the same row combined
+  (added, subtracted, averaged, compared - for example a yearly total from a table with one column per month),
+  reply {{"unsupported": true}}.
+- Never name an output something it is not (do not call one month's sum "total").
 - Never invent columns or values."""
 
 

@@ -287,6 +287,11 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
                 # silently replaced by generated code. See analysis/plan_verify.py.
                 from analysis import plan_verify
                 verification = plan_verify.verify(res.plan, df, res.frame)
+                # A plan that both engines agree on can still have ignored part of
+                # the question. Where that is detectable, do not claim a cross-check.
+                dropped = plan_verify.dropped_condition(query, res.plan)
+                if verification.status == "verified" and dropped:
+                    verification = plan_verify.Verification("unverified", [dropped], verification.checks)
                 if verification.status == "disagreement":
                     try:
                         from audit import audit_log
@@ -313,8 +318,9 @@ def _execute_query_against_df(df: pd.DataFrame, query: str, session_id: str) -> 
                     basis["basis"] = ("Computed from a validated query plan, run as parameterised SQL and "
                                       "cross-checked by an independent second computation")
                 else:
+                    why = verification.reasons[0] if verification.reasons else "the second computation could not run"
                     basis["basis"] = ("Computed from a validated query plan, run as parameterised SQL. "
-                                      "NOT cross-checked: the second computation could not run")
+                                      "NOT cross-checked: " + why)
                 return {
                     "success": shaped["resultType"] != "error",
                     "error": shaped.get("error"),

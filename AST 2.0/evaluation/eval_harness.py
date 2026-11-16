@@ -112,6 +112,8 @@ class QuestionResult:
     confidence: str = ""
     manual_seconds: Optional[float] = None
     signature: str = ""      # answer VALUES only (no column names / formatting), used for repeat consistency
+    method: str = ""         # which route answered: shortcut | query_plan | generated_python | ...
+    verification: str = ""   # verified | unverified | disagreement | "" (route has no cross-check)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -441,8 +443,9 @@ def run_eval(
                                      "solver_exception", exc, latency, manual_seconds=q.manual_seconds)
             elif not out.get("success"):
                 err = out.get("error") or "unknown error"
+                # Withheld on purpose ("I can't verify this") is not an error: its own outcome.
                 res = QuestionResult(q.id, run, q.question, q.category, q.answer_type, q.expected, "", False, False,
-                                     classify_failure(err), err[:300], latency,
+                                     "abstained" if out.get("abstained") else classify_failure(err), err[:300], latency,
                                      out.get("resultType", ""), out.get("confidence", ""), q.manual_seconds)
             else:
                 v = check_answer(q, out)
@@ -452,6 +455,8 @@ def run_eval(
                                      out.get("confidence", ""), q.manual_seconds)
             if res.executed:
                 res.signature = _signature(out)
+            res.method = str(out.get("method") or "")
+            res.verification = str((out.get("verification") or {}).get("status") or "")
             results.append(res)
             if on_result:
                 on_result(res)

@@ -1,0 +1,95 @@
+{
+ "entries": {
+  "081a05b777f17b8c01c5575571697c0a": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "2e09c27222950c61167dd814bb16b537": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify columns exist\nrequired_cols = ['department', 'amount_inr']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n\n# Compute net expense total by department\nresult = df.groupby('department', as_index=False)['amount_inr'].sum()\n\n# Plot bar chart\nresult = px.bar(result, x='department', y='amount_inr')"
+   ]
+  },
+  "567e152d39bcde45e0ad8cb8b4874ba9": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"max\",\"column\":\"amount_inr\",\"as\":\"max_amount\"}]}"
+   ]
+  },
+  "68a4cf246b4c1a28fa105d3a575fdde6": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"department\"},{\"agg\":\"sum\",\"column\":\"amount_inr\",\"as\":\"net_expense\"}],\"group_by\":[\"department\"],\"order_by\":[{\"by\":\"net_expense\",\"dir\":\"desc\"}]}"
+   ]
+  },
+  "6f11bcfc023f09abf4a56f28aee84619": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"category\"},{\"agg\":\"sum\",\"column\":\"amount_inr\",\"as\":\"total\"}],\"group_by\":[\"category\"],\"order_by\":[{\"by\":\"total\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  },
+  "7771216e9bfd833beca3673b54192d3c": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "if 'amount_inr' not in df.columns or 'category' not in df.columns:\n    raise ValueError('Column not found')\ntotal_net = df['amount_inr'].sum()\nsoftware_spend = df.loc[df['category'] == 'Software', 'amount_inr'].sum()\nresult = (software_spend / total_net) * 100."
+   ]
+  },
+  "8e8b4f861febfe58c07e4e95ef6dafb1": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"department\"},{\"agg\":\"sum\",\"column\":\"amount_inr\",\"as\":\"total\"}],\"group_by\":[\"department\"],\"order_by\":[{\"by\":\"total\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  },
+  "939eca50233460680da371e81be67ba0": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"expense_id\"},{\"column\":\"employee_id\"},{\"column\":\"department\"},{\"column\":\"category\"},{\"column\":\"amount_inr\"},{\"column\":\"submitted\"}],\"filters\":[{\"column\":\"amount_inr\",\"op\":\"<\",\"value\":0}]}"
+   ]
+  },
+  "a98c3872e243da9a1482fefbad564f33": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count_distinct\",\"column\":\"expense_id\",\"as\":\"unique_expense_claims\"}]}"
+   ]
+  },
+  "c954f23be725087abb46598efa680fb5": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count_distinct\",\"column\":\"employee_id\",\"as\":\"distinct_employees\"}]}"
+   ]
+  },
+  "ca7f5df606037cc26a3bf318e5db5c48": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"sum\",\"column\":\"amount_inr\",\"as\":\"total\"}]}"
+   ]
+  },
+  "cb8e423604065b5863411dd51d66bb0a": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"sum\",\"column\":\"amount_inr\",\"as\":\"net_spend\"}],\"filters\":[{\"column\":\"department\",\"op\":\"=\",\"value\":\"Sales\"},{\"column\":\"category\",\"op\":\"=\",\"value\":\"Travel\"}]}"
+   ]
+  },
+  "e58abb48f06bdea57a052db0d71538f1": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"avg\",\"column\":\"amount_inr\",\"as\":\"avg_amount\"}],\"filters\":[{\"column\":\"amount_inr\",\"op\":\">\",\"value\":0}]}"
+   ]
+  },
+  "f73e0828bc36e7fc84bf91470c81d51d": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"expense_count\"}],\"filters\":[{\"column\":\"submitted\",\"op\":\"between\",\"value\":[\"2026-05-01\",\"2026-05-31\"]}]}"
+   ]
+  },
+  "fe61b87c67318b0f10d6a6133ecef34b": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"refund_count\"}],\"filters\":[{\"column\":\"amount_inr\",\"op\":\"<\",\"value\":0}]}"
+   ]
+  }
+ },
+ "version": 1
+}
