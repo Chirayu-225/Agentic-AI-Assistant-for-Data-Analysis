@@ -15,18 +15,18 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # Modular components
-from sandbox       import is_code_safe, safe_exec
-from cleaning      import rule_based_clean
-from query_engine  import (detect_shortcut, build_analysis_prompt,
+from execution.sandbox       import is_code_safe, safe_exec
+from data_cleaning.cleaning      import rule_based_clean
+from analysis.query_engine  import (detect_shortcut, build_analysis_prompt,
                             build_retry_prompt, cached_llm_call,
                             llm_with_fallback, insight_llm,
                             extract_and_clean_code)
-from profiler      import (build_dataset_profile, format_profile_for_llm,
+from analysis.profiler      import (build_dataset_profile, format_profile_for_llm,
                             build_insight_prompt, build_auto_analyze_prompt,
                             build_explain_prompt)
 from ui            import (render_insight_box, render_explanation,
                             render_auto_chart, compute_confidence)
-from rag_engine    import (index_document, rag_answer, extract_document_insights,
+from rag.rag_engine    import (index_document, rag_answer, extract_document_insights,
                             check_dependencies, all_deps_ok)
 
 # ==========================================
