@@ -55,6 +55,7 @@ def main():
         if mode["fallback"] == "down":
             raise ConnectionError("gemini unreachable")
         return "from gemini"
+    real_fallback = lp._call_fallback  # the real HTTP call; PART 4 checks its timeout
     lp._call_groq, lp._call_fallback = primary, fallback
 
     def reset(primary_mode="ok", fallback_mode="ok"):
@@ -188,6 +189,44 @@ def main():
     except rs.DeadlineExceeded:
         check("an expired request does not start a model call at all", calls == {"primary": 0, "fallback": 0}, str(calls))
     check("... and a deadline is not counted as a provider failure", rs.breaker("primary").state() == "closed")
+
+    # A slow or hanging Gemini must not stretch a request past its deadline either.
+    import requests
+    seen_post = {}
+
+    def hanging_post(url, headers=None, json=None, timeout=None):
+        seen_post["timeout"] = timeout
+        clock["t"] += timeout                      # the server holds the connection for the whole timeout
+        raise requests.exceptions.ReadTimeout("fallback did not answer")
+    real_post, requests.post = requests.post, hanging_post
+    prior_key = os.environ.get("GEMINI_API_KEY")
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        with rs.request_deadline(30):
+            clock["t"] += 25
+            try:
+                real_fallback("p", 0.0, "code", 64)
+            except requests.exceptions.ReadTimeout:
+                pass
+        check("the real fallback call is given only what the request has left (5s, not 90s)",
+              abs(seen_post.get("timeout", -1) - 5) < 1e-6, str(seen_post))
+        lp._call_fallback = real_fallback
+        reset(primary_mode="down")
+        start = clock["t"]
+        try:
+            with rs.request_deadline(30):
+                lp.llm_uncached_code_call("p")
+            check("a hanging fallback ends the request", False)
+        except Exception as e:  # noqa: BLE001 - any clear error is fine; a hang is not
+            check("a hanging fallback cannot hold a request past its deadline",
+                  clock["t"] - start <= 30 + 1e-6, f"{clock['t'] - start:.1f}s; {type(e).__name__}: {str(e)[:120]}")
+    finally:
+        requests.post = real_post
+        lp._call_fallback = fallback
+        if prior_key is None:
+            os.environ.pop("GEMINI_API_KEY", None)
+        else:
+            os.environ["GEMINI_API_KEY"] = prior_key
 
     print("\n" + "=" * 70 + "\nPART 5 - the pipeline reports it\n" + "=" * 70)
     import pandas as pd

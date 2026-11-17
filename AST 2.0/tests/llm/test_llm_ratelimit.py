@@ -19,6 +19,11 @@ os.environ["LLM_USAGE_PATH"] = os.path.join(tempfile.mkdtemp(), "llm_usage.json"
 os.environ.pop("FALLBACK_LLM_BASE_URL", None)
 os.environ.pop("FALLBACK_LLM_API_KEY", None)
 os.environ.pop("FALLBACK_CODE_MODEL", None)
+# A real Gemini key in the shell would make the fallback live, and the mocked primary
+# failures below would then reach Google's API. Keep this test offline whatever is set.
+for _k in ("FALLBACK_CHAT_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BASE_URL",
+           "GEMINI_CODE_MODEL", "GEMINI_CHAT_MODEL"):
+    os.environ.pop(_k, None)
 
 from llm import llm_provider as lp
 
