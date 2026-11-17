@@ -1,0 +1,125 @@
+{
+ "entries": {
+  "126156642075bfa5a712e87fc72ad5f7": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"count\"}],\"filters\":[{\"column\":\"status\",\"op\":\"=\",\"value\":\"Overdue\"}]}"
+   ]
+  },
+  "28201a40e7eb2c1c0e31bf7c779c7b29": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "331a674dae8a669a7afb683d346f9967": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"sum\",\"column\":\"amount\",\"as\":\"total_amount\"}],\"filters\":[{\"column\":\"status\",\"op\":\"=\",\"value\":\"Overdue\"}]}"
+   ]
+  },
+  "373c7713c7b57d6130827dd6f5ea83f8": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"cnt\"}],\"filters\":[{\"column\":\"amount\",\"op\":\">\",\"value\":50000}]}"
+   ]
+  },
+  "3a9fd7257f4a361513644db261ec7d87": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"median\",\"column\":\"days_to_pay\",\"as\":\"median_days_to_pay\"}],\"filters\":[{\"column\":\"status\",\"op\":\"=\",\"value\":\"Paid\"}]}"
+   ]
+  },
+  "3e20ba712b000cfacd4b17a33de5250a": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"unsupported\": true}"
+   ]
+  },
+  "5449bd51a1450307ed0e1daa23088d44": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['invoice_date', 'amount']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n\n# Extract year-month from invoice_date\ndf['_year_month'] = df['invoice_date'].dt.strftime('%Y-%m')\n\n# Group by month and sum amount\nmonthly_totals = df.groupby('_year_month')['amount'].sum().reset_index(name='total_amount')\n\n# Find month with maximum total\nmax_month = monthly_totals.loc[monthly_totals['total_amount'].idxmax(), '_year_month']\n\n# Assign result\nresult = max_month\n# Clean up temporary column\ndf.drop(columns=['_year_month'], inplace=True)"
+   ]
+  },
+  "638c406139ff91e513d63877eb960884": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count_distinct\",\"column\":\"region\",\"as\":\"distinct_regions\"}]}"
+   ]
+  },
+  "661c948dab9c29e10e7984a42bb4cc03": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"avg\",\"column\":\"amount\",\"as\":\"avg_amount\"}]}"
+   ]
+  },
+  "75d9a0b0c4ffeb3edbedff8320f0e6a1": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"region\"},{\"agg\":\"sum\",\"column\":\"amount\",\"as\":\"total_amount\"}],\"group_by\":[\"region\"],\"order_by\":[{\"by\":\"total_amount\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  },
+  "7b5777c6575ffae9ccd281123e0bc1af": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"region\"},{\"agg\":\"sum\",\"column\":\"amount\",\"as\":\"total_amount\"}],\"group_by\":[\"region\"],\"order_by\":[{\"by\":\"total_amount\",\"dir\":\"desc\"}]}"
+   ]
+  },
+  "86596c33007f86c5d3d8c2e816bdc273": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"sum\",\"column\":\"amount\",\"as\":\"total_amount\"}],\"filters\":[{\"column\":\"invoice_date\",\"op\":\"between\",\"value\":[\"2026-03-01\",\"2026-03-31\"]}]}"
+   ]
+  },
+  "984eb27974afe7649f040bb8f6825c79": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"total_invoices\"}]}"
+   ]
+  },
+  "987fb4df76b86f7678dc682cf3c32071": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "if 'amount' not in df.columns:\n    raise ValueError('Column not found')\nif 'segment' not in df.columns:\n    raise ValueError('Column not found')\ntotal_amount = df['amount'].sum()\nenterprise_amount = df.loc[df['segment'] == 'Enterprise', 'amount'].sum()\nresult = (enterprise_amount / total_amount) * 100.0"
+   ]
+  },
+  "9babd04391e4aa0024905bbe482f57fe": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"invoice_id\"},{\"column\":\"invoice_date\"},{\"column\":\"region\"},{\"column\":\"segment\"},{\"column\":\"status\"},{\"column\":\"amount\"},{\"column\":\"discount_pct\"},{\"column\":\"days_to_pay\"}],\"filters\":[{\"column\":\"status\",\"op\":\"=\",\"value\":\"Overdue\"},{\"column\":\"region\",\"op\":\"=\",\"value\":\"North\"}]}"
+   ]
+  },
+  "9d902e93c4650b82228a2a237956681a": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "# Verify required columns exist\nrequired_cols = ['invoice_date', 'amount']\nfor col in required_cols:\n    if col not in df.columns:\n        raise ValueError('Column not found')\n\n# Create a month column from invoice_date\ndf['month'] = df['invoice_date'].dt.to_period('M').dt.to_timestamp()\n\n# Aggregate total amount by month\nresult = df.groupby('month', as_index=False)['amount'].sum()\n\n# Plot line chart\nresult = px.line(result, x='month', y='amount', title='Total Invoiced Amount by Month')"
+   ]
+  },
+  "a0df82c97563e3f453e6a7b0f64938d3": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"total\"}],\"filters\":[{\"column\":\"days_to_pay\",\"op\":\"is_null\"}]}"
+   ]
+  },
+  "a5255be11a8f8a940f84bf4f4194ca16": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"segment\"},{\"agg\":\"avg\",\"column\":\"amount\",\"as\":\"avg_amount\"}],\"group_by\":[\"segment\"],\"order_by\":[{\"by\":\"avg_amount\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  },
+  "cdc0cfc4d967593f6b2f34e5a4793105": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"avg\",\"column\":\"discount_pct\",\"as\":\"avg_discount_pct\"}]}"
+   ]
+  },
+  "d77693c1a3f34f005739f71d616800fa": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"count\"}],\"filters\":[{\"column\":\"region\",\"op\":\"=\",\"value\":\"South\"},{\"column\":\"status\",\"op\":\"=\",\"value\":\"Pending\"}]}"
+   ]
+  }
+ },
+ "version": 1
+}

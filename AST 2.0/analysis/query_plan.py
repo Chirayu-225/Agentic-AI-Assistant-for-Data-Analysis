@@ -242,6 +242,15 @@ def validate_plan(plan: Any, df: pd.DataFrame) -> Plan:
         for i in items:
             if i.agg is None and i.column not in gb:
                 raise PlanError(f"column {i.column!r} must appear in group_by when select contains aggregates")
+    # A number per group without the group's name answers nothing ("which region
+    # is highest?" -> a bare total). Models leave the key out often, so group
+    # columns missing from select are added here, first. Both engines run this
+    # canonical plan, and it is the one recorded.
+    present = {i.column for i in items if i.agg is None}
+    missing = [g for g in dict.fromkeys(gb) if g not in present]
+    if missing:
+        items = [SelectItem(column=g, agg=None, out=g) for g in missing] + items
+        outs = [i.out for i in items]
 
     # filters ----------------------------------------------------------------
     raw_f = plan.get("filters", [])

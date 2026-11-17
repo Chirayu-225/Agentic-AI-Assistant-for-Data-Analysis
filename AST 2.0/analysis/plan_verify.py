@@ -29,7 +29,8 @@ from __future__ import annotations
 import datetime as _dt
 import math
 from dataclasses import dataclass, field
-from typing import Any
+import re
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -333,6 +334,30 @@ def check_invariants(plan: Plan, df: pd.DataFrame, frame: pd.DataFrame) -> list:
 
 
 # ── entry point ────────────────────────────────────────────────────────────
+# ── did the plan drop part of the question? ────────────────────────────────
+# Agreement between two engines proves the PLAN was computed correctly. It
+# says nothing about whether the plan covers the question. One case is
+# detectable without a model: the question asks to leave something out, and
+# the plan filters nothing at all. (Evaluation gate, EXP05.)
+_EXCLUSION = re.compile(
+    r"\b(excluding|excludes|excluded|exclude|except|without|not\s+including|not\s+counting|"
+    r"other\s+than|apart\s+from|ignoring|ignore|leaving\s+out|omitting)\b", re.IGNORECASE)
+
+
+def dropped_condition(question: str, plan: Plan) -> Optional[str]:
+    """A reason string when the question contains an exclusion word but the
+    plan has no filter; otherwise None. Deliberately narrow: it can raise a
+    false alarm (which only downgrades a label), never hide a real answer."""
+    if plan.filters:
+        return None
+    m = _EXCLUSION.search(question or "")
+    if not m:
+        return None
+    word = " ".join(m.group(1).lower().split())
+    return (f'the question says "{word}" but the query plan filters nothing, '
+            f"so part of the question may have been ignored")
+
+
 def verify(plan: Plan, df: pd.DataFrame, frame: pd.DataFrame) -> Verification:
     checks: list = []
     try:

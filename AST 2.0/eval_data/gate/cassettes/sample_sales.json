@@ -1,0 +1,41 @@
+{
+ "entries": {
+  "1d080b78a8a6ba16fd1d8ac1f4d8a291": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count\",\"column\":\"*\",\"as\":\"count\"}],\"filters\":[{\"column\":\"product\",\"op\":\"=\",\"value\":\"Phone\"}]}"
+   ]
+  },
+  "363ed98f10af7fa3e539ad33f007aa46": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"avg\",\"column\":\"units\",\"as\":\"avg_units\"}]}"
+   ]
+  },
+  "8b09c885966a012aa84acd883dc01353": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"agg\":\"count_distinct\",\"column\":\"product\",\"as\":\"distinct_products\"}]}"
+   ]
+  },
+  "948e3c8c7918aebaab8976334c521303": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"region\"},{\"agg\":\"sum\",\"column\":\"revenue\",\"as\":\"total\"}],\"group_by\":[\"region\"],\"order_by\":[{\"by\":\"total\",\"dir\":\"desc\"}]}"
+   ]
+  },
+  "b16147261349b3e2e0613dd5c1327959": {
+   "head": "You are an expert Python data analyst.\n\nDataset information:\nDataFrame name: df\nExact colu",
+   "responses": [
+    "if 'region' not in df.columns or 'revenue' not in df.columns:\n    raise ValueError('Column not found')\nagg = df.groupby('region', as_index=False)['revenue'].sum()\nresult = px.bar(agg, x='region', y='revenue')"
+   ]
+  },
+  "c0c3118f09830e392a29d6eeb3a90ff0": {
+   "head": "You translate a data question into a JSON QUERY PLAN. You do NOT write code.\n\nTable column",
+   "responses": [
+    "{\"select\":[{\"column\":\"region\"},{\"agg\":\"sum\",\"column\":\"revenue\",\"as\":\"total_revenue\"}],\"group_by\":[\"region\"],\"order_by\":[{\"by\":\"total_revenue\",\"dir\":\"desc\"}],\"limit\":1}"
+   ]
+  }
+ },
+ "version": 1
+}

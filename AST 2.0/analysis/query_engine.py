@@ -105,7 +105,14 @@ def describe_schema(df: pd.DataFrame, max_values: int = 15) -> str:
         elif pd.api.types.is_bool_dtype(s):
             lines.append(f"- {col} (true/false)")
         elif pd.api.types.is_numeric_dtype(s):
-            lines.append(f"- {col} (number)")
+            # Say when a number column goes negative: questions like "excluding
+            # refunds" or "net of returns" refer to those rows without naming them.
+            try:
+                neg, total = int((s < 0).sum()), int(s.notna().sum())
+            except Exception:
+                neg, total = 0, 0
+            lines.append(f"- {col} (number): {neg} of {total} values are negative" if neg
+                         else f"- {col} (number)")
         else:
             vals = s.dropna().astype(str)
             if col in personal:
