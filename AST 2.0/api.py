@@ -457,7 +457,8 @@ def analyze(req: AnalyzeRequest, x_service_secret: str = Header(default="")):
     cached = session_cache.get(req.sessionId, req.fileUrl)
     if cached is not None:
         try:
-            return scrub_result(run_analysis_from_cleaned_df(cached.cleaned_df, req.query, req.sessionId))
+            return scrub_result(run_analysis_from_cleaned_df(cached.cleaned_df, req.query, req.sessionId,
+                                                             raw_bytes=cached.csv_bytes, filename=cached.filename))
         except Exception as e:
             return _server_error(e, resultType="error", resultData=None)
 
@@ -773,4 +774,20 @@ def admin_stats(x_service_secret: str = Header(default="")):
         },
         "sandboxMemoryCap": _SANDBOX_HAS_MEMORY_CAP,
         "llmUsage": llm_usage_stats(),
+        "circuitBreakers": _breaker_stats(),
+        "datasetStore": _dataset_store_status(),
     }
+
+
+def _breaker_stats() -> dict:
+    from llm import resilience
+    return resilience.breaker_stats()
+
+
+def _dataset_store_status() -> dict:
+    from storage import dataset_store
+    if not dataset_store.configured():
+        return {"configured": False}
+    store = dataset_store.get_store()
+    return {"configured": True, "available": store is not None,
+            "backend": store.backend if store else None, "error": dataset_store.store_error() or None}

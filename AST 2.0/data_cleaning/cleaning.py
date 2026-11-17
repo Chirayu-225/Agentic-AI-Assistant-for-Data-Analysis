@@ -262,6 +262,11 @@ def detect_currencies(raw_df: pd.DataFrame) -> dict:
     return found
 
 
+def _dup_more_warning(n: int) -> str:
+    return (f"⚠ {n} more row(s) became identical after formatting was "
+            f"standardised — KEPT; check whether they are accidental copies")
+
+
 def _dup_warning(n: int) -> str:
     return (f"⚠ {n} row(s) are exact copies of another row — KEPT, because identical rows are often genuine repeat "
             f"transactions. The audit trail lists which rows, and lets you remove them if they are accidental copies.")
@@ -377,6 +382,7 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
 
     # ── 4. Exact duplicate rows: reported, removed only on request ────────────
     _dup_log_at = None
+    _dup_more_at = None
     n_dupes = int(df_c.duplicated().sum())
     if n_dupes and drop_exact_duplicates:
         df_c.drop_duplicates(inplace=True)
@@ -521,8 +527,8 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
     else:
         n_after = int(df_c.duplicated().sum())
         if n_after > n_dupes:
-            log.append(f"⚠ {n_after - n_dupes} more row(s) became identical after formatting was "
-                       f"standardised — KEPT; check whether they are accidental copies")
+            _dup_more_at = len(log)
+            log.append(_dup_more_warning(n_after - n_dupes))
 
     # Rows that repeat a unique record ID and agree on every value both of
     # them have (one copy may have a blank cell) are the same record
@@ -564,9 +570,17 @@ def rule_based_clean(raw_df: pd.DataFrame, drop_exact_duplicates: bool = False,
         if null_count:
             log.append(f"⚠ '{col}' has {null_count} missing value(s) — left blank (calculations skip them; nothing was filled in)")
 
-    if _dup_log_at is not None:          # the warning counted copies before the same-ID rule ran: say only what is still there
+    # Both duplicate warnings were written before the same-ID rule above ran, which can
+    # remove the very rows they say were KEPT. Rewrite them to say only what is still
+    # there, so the log never claims a row was kept when it was removed.
+    if _dup_log_at is not None or _dup_more_at is not None:
         n_left = int(df_c.duplicated().sum())
-        log[_dup_log_at] = _dup_warning(n_left) if n_left else None
+        if _dup_log_at is not None:
+            log[_dup_log_at] = _dup_warning(n_left) if n_left else None
+            if _dup_more_at is not None:
+                log[_dup_more_at] = None  # already counted in the line above
+        else:
+            log[_dup_more_at] = _dup_more_warning(n_left) if n_left else None
         log = [l for l in log if l is not None]
     try:                                 # which raw row each remaining row came from (the audit trail needs it; nothing else does)
         _src = (pd.Index(df_c.index).to_numpy() + row_offset) if pd.api.types.is_integer_dtype(df_c.index) else None

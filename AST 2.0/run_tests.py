@@ -19,12 +19,24 @@ def discover(fragments):
     return sorted(found)
 
 
+# Keys that would let a test reach a real second provider. The suite stubs every model call,
+# so a key in the shell must never turn a mocked failure into a live request to Google.
+OFFLINE_STRIP = ("GEMINI_API_KEY", "FALLBACK_LLM_API_KEY", "FALLBACK_LLM_BASE_URL")
+
+
+def child_env(base=None):
+    env = dict(os.environ if base is None else base, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    for k in OFFLINE_STRIP:
+        env.pop(k, None)
+    return env
+
+
 def run(module):
     t0 = time.time()
     try:
         # Piped output on Windows defaults to cp1252, which cannot print the rupee sign or check
         # marks the tests print. Force UTF-8 so a console encoding is never a test failure.
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        env = child_env()
         r = subprocess.run([sys.executable, "-m", module], cwd=ROOT, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", env=env, timeout=300)
         ok, tail = r.returncode == 0, (r.stdout + r.stderr).strip().splitlines()[-1:]

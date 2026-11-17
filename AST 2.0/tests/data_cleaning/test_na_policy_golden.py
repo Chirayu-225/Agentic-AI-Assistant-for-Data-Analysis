@@ -27,7 +27,8 @@ GOLDEN_PANDAS = "3.0.5"
 
 # relative path -> (raw frame hash, cleaned frame + log hash); "ERR:<type>" if reading/cleaning raised
 GOLDEN = {
-    "heldout/expenses_dirty.csv": ('a96519a9ee81521eade3b866', '67db8b7244f6b1725891c934'),
+    # Log hash refreshed 2026-11-17: cleaned frame unchanged; two duplicate warnings that said 8 + 4 rows were KEPT were false (the same-ID rule removes those rows) and are gone. See tests/data_cleaning/test_dup_log_truthful.py.
+    "heldout/expenses_dirty.csv": ('a96519a9ee81521eade3b866', '84798bc5b9a57190ee98f965'),
     "heldout/expenses_questions.csv": ('b0d65b3fab040f5d3b67b1f0', '971c6b84d4ae78834b2aa26c'),
     "heldout/invoices_messy.csv": ('b8bff5702799933912893954', 'ffa230ed5c005ecaa1977d25'),
     "heldout/invoices_questions.csv": ('75cdfa144ab15e483b6da174', '819a22ac945e0968c8c5e2f0'),

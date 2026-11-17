@@ -23,6 +23,7 @@ WHAT THIS DOES NOT DO (yet)
 
 from __future__ import annotations
 
+import math
 import io
 import json
 import os
@@ -53,14 +54,26 @@ def _json_safe_scalar(value: Any) -> Any:
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
-        return float(value)
+        return _tidy_float(float(value))
     if isinstance(value, np.bool_):
         return bool(value)
     if isinstance(value, (pd.Timestamp,)):
         return value.isoformat()
     if isinstance(value, float) and np.isnan(value):
         return None
+    if isinstance(value, float):
+        return _tidy_float(value)
     return value
+
+
+def _tidy_float(x: float) -> float:
+    """Round to 15 significant digits so float noise (4853917.909999996 for
+    4853917.91) never reaches the user. 15 digits is what a double can hold
+    exactly, so no real digit is lost; verification compares the unrounded
+    values before this runs."""
+    if math.isnan(x) or math.isinf(x):
+        return x
+    return float(f"{x:.15g}")
 
 
 def _dataframe_to_records(df: pd.DataFrame, max_rows: int = MAX_RESULT_ROWS) -> tuple[list[dict], int, bool]:
@@ -424,14 +437,63 @@ def _build_query_repair_prompt(schema_text: str, query: str, code: str, error: s
     )
 
 
-def run_analysis_from_cleaned_df(cleaned_df: pd.DataFrame, query: str, session_id: str) -> dict:
+def _record_dataset_version(result: dict, session_id: str, raw_bytes: bytes | None, filename: str | None,
+                            cleaned_df: pd.DataFrame, query: str) -> dict:
+    """Hazard H4: say which exact data an answer was computed from. When a
+    dataset store is configured (storage/dataset_store.py), the uploaded bytes
+    and the cleaned table are recorded as immutable versions and the answer is
+    recorded against the cleaned one. With no store configured this does
+    nothing. A store that is configured but failing never blocks the answer;
+    the response then says that no version was recorded."""
+    try:
+        from storage import dataset_store
+        if raw_bytes is None or not dataset_store.configured() or not isinstance(result, dict):
+            return result
+        store = dataset_store.get_store()
+        if store is None:
+            raise RuntimeError("store unavailable")
+        upload = store.register_upload(session_id, filename or "", raw_bytes)
+        version = store.add_version(session_id, upload.version_id, cleaned_df, kind="clean",
+                                    note="cleaned table used for analysis")
+        store.record_answer(session_id, version.version_id, query, str(result.get("method") or ""),
+                            str((result.get("verification") or {}).get("status") or ""))
+        result["datasetVersion"] = version.to_dict()
+    except Exception as e:
+        result["datasetVersion"] = None
+        result["datasetVersionError"] = "The dataset version could not be recorded for this answer."
+        try:
+            from audit import audit_log
+            audit_log.record("dataset_version_failed", error_type=type(e).__name__)
+        except Exception:
+            pass
+    return result
+
+
+def _within_deadline(fn) -> dict:
+    """Hazard H5: one time budget for the whole request (llm/resilience.py), so
+    a slow model cannot hold it open, and a note on the response when the
+    second provider had to answer."""
+    from llm import resilience
+    with resilience.request_deadline(resilience.default_request_seconds()) as scope:
+        result = fn()
+    if scope.fallback_used and isinstance(result, dict):
+        result["llmFallbackUsed"] = True
+    return result
+
+
+def run_analysis_from_cleaned_df(cleaned_df: pd.DataFrame, query: str, session_id: str,
+                                 raw_bytes: bytes | None = None, filename: str | None = None) -> dict:
     """The cache-hit fast path: session_cache already has this exact
     (session, file) pair's cleaned DataFrame from a previous request, so
     there's nothing to fetch or parse or clean this time — just route
     and run the new question against it. api.py calls this instead of
     run_analysis() whenever session_cache.get() returns a hit, skipping
-    the Blob fetch entirely on its side too."""
-    return _execute_query_against_df(cleaned_df, query, session_id)
+    the Blob fetch entirely on its side too.
+
+    `raw_bytes` and `filename` (the cached upload) are optional and used only
+    to record the dataset version the answer came from."""
+    result = _within_deadline(lambda: _execute_query_against_df(cleaned_df, query, session_id))
+    return _record_dataset_version(result, session_id, raw_bytes, filename, cleaned_df, query)
 
 
 def run_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str, file_url: str | None = None) -> dict:
@@ -464,7 +526,7 @@ def run_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str, f
     not an error, just no caching for that call.
     """
     if should_use_large_csv_path(csv_bytes, filename):
-        return _run_large_csv_analysis(csv_bytes, filename, query, session_id)
+        return _within_deadline(lambda: _run_large_csv_analysis(csv_bytes, filename, query, session_id))
 
     try:
         df = read_tabular_file(csv_bytes, filename)
@@ -481,4 +543,5 @@ def run_analysis(csv_bytes: bytes, filename: str, query: str, session_id: str, f
         from storage import session_cache
         session_cache.put(session_id, file_url, filename, csv_bytes, df)
 
-    return _execute_query_against_df(df, query, session_id)
+    result = _within_deadline(lambda: _execute_query_against_df(df, query, session_id))
+    return _record_dataset_version(result, session_id, csv_bytes, filename, df, query)

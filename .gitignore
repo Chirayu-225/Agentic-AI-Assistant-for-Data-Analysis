@@ -62,3 +62,9 @@ desktop.ini
 
 # Generated cleaning-benchmark data (regenerate with: python clean_bench.py build). MANIFEST.json IS committed.
 AST 2.0/eval_data/clean_bench/generated/
+
+# Pre-restructure safety backup (kept locally, never committed)
+AST_2.0_pre-restructure_backup.zip
+
+# Regenerated on every eval-gate run (python -m evaluation.eval_gate)
+AST 2.0/eval_data/gate/last_report.md
