@@ -3,7 +3,7 @@ test_agent_validators.py — the agent runs the deterministic value repairs (val
 
 Checked: the repairs are reported (block + banner sentence) and become the working table; a blank a validator makes is not
 filled back in; a clean table gets no validators block and no store; a crashing validator cannot break the agent.
-The model and the sandbox are stubbed; no Groq.   Run: python test_agent_validators.py
+The model and the sandbox are stubbed; no Groq.   Run: python -m tests.data_cleaning.test_agent_validators
 """
 import contextlib
 import io
@@ -50,7 +50,7 @@ def csv_bytes(df):
 def main():
     from storage import cache_layer
     from data_cleaning import cleaning_agent
-    from analysis import query_engine
+    from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
     from execution import sandbox_limits
     from storage import session_cache
 
@@ -64,7 +64,7 @@ def main():
             if "Defects to fix" in prompt:
                 return "REASONING:\n- region: nothing to change\n```python\ncleaned_df = df.copy()\n```"
             return DIAG
-        query_engine.llm_with_fallback = fake_model
+        llm_provider.llm_with_fallback = fake_model
         sandbox_limits.run_sandboxed = lambda code, d, include_charts=False, timeout_seconds=20, **k: \
             SimpleNamespace(success=True, produced=True, value=d.copy(), error=None)
         with contextlib.redirect_stdout(io.StringIO()):

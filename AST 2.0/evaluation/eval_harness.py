@@ -12,14 +12,14 @@ HOW THIS DIFFERS FROM eval.py
     not about the system agreeing with itself.
 
 WORKFLOW
-    1. python eval_harness.py --init-template mydata.csv
+    1. python -m evaluation.eval_harness --init-template mydata.csv
            writes questions_template.csv with example rows built from the
            file's real column names.
     2. Fill in `expected` for each question BY HAND, independently of the
        assistant. Delete rows you don't want. Add your own questions.
        (Optional `manual_seconds`: how long the task took you in Excel,
        so the report can compare effort.)
-    3. python eval_harness.py --dataset mydata.csv --questions questions.csv
+    3. python -m evaluation.eval_harness --dataset mydata.csv --questions questions.csv
            needs GROQ_API_KEY (it calls the real LLM pipeline).
        or add  --solver shortcut  to run the deterministic, no-LLM
            baseline (answers only questions the keyword shortcuts cover).
@@ -638,7 +638,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.init_template:
         path = write_template(args.init_template, "questions_template.csv")
         print(f"Wrote {path}. Fill in `expected` by hand (independently of the assistant), then run:\n"
-              f"  python eval_harness.py --dataset {args.init_template} --questions {path}")
+              f"  python -m evaluation.eval_harness --dataset {args.init_template} --questions {path}")
         return 0
 
     if not args.dataset or not args.questions:

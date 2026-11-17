@@ -1,7 +1,7 @@
 """
 test_sandbox_allowlist.py — the broadened allowlist: common pandas/numpy/plotly
 idioms must work, and the new chainable objects (resample/ewm) must NOT expose
-file I/O or the raw object.   Run: python3 test_sandbox_allowlist.py
+file I/O or the raw object.   Run: python -m tests.execution.test_sandbox_allowlist
 """
 import os, sys
 import numpy as np

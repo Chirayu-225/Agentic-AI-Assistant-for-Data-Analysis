@@ -2,14 +2,14 @@
 test_cleaning_agent_retry.py — the Data Quality Agent's fix step when the
 model's answer is cut off (no closing code fence), with the LLM stubbed:
 the cut-off answer is NOT cached, a compact retry is made, and its code
-runs. Run: python test_cleaning_agent_retry.py
+runs. Run: python -m tests.data_cleaning.test_cleaning_agent_retry
 """
 import sys
 
 import pandas as pd
 
 from llm import llm_provider
-from analysis import query_engine
+from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
 
 
 def main():
@@ -50,7 +50,7 @@ def main():
     def fake_uncached(prompt, temperature=0.0, max_tokens=2048):
         prompts.append(("retry", max_tokens, "too long" in prompt))
         return "REASONING:\n- country: upper-cased\n```python\ncleaned_df = df.copy()\ncleaned_df['country'] = cleaned_df['country'].str.upper()\n```"
-    query_engine.llm_with_fallback = fake_code
+    llm_provider.llm_with_fallback = fake_code
     llm_provider.llm_uncached_code_call = fake_uncached
 
     import io

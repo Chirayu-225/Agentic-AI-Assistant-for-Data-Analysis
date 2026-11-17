@@ -23,7 +23,7 @@ WHAT THIS PROVES, END TO END, WITH NO MOCKING OF THE SANDBOX ITSELF
       parsing) are unit-tested in isolation beyond that — everything
       touching the sandbox goes through the real thing.
 
-Run: python3 test_multi_table_service.py
+Run: python -m tests.analysis.test_multi_table_service
 """
 
 import pandas as pd

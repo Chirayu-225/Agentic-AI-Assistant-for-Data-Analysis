@@ -3,7 +3,7 @@ test_audit_and_limits.py — the audit log (format, privacy, tamper evidence,
 rotation-safe verification), the rate limiter (windows, isolation, recovery,
 memory bound), and the sandbox/PII/injection hooks that feed the audit log.
 
-Run: python3 test_audit_and_limits.py
+Run: python -m tests.security.test_audit_and_limits
 """
 
 import json

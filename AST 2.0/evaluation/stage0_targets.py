@@ -7,7 +7,7 @@ adjust.
 Source: the dev baseline of the existing reader + rule_based_clean (see clean_score.py --adapter legacy).
 Dev split only. The frozen split gets its first look when the full pipeline exists.
 
-    python clean_score.py --adapter stage0     # prints PASS / MISS against these targets
+    python -m evaluation.clean_score --adapter stage0     # prints PASS / MISS against these targets
 
 DEFINITION OF "stage0" in the scorer: the new reader -> an all-text table -> the SAME rule_based_clean
 the baseline used, so the comparison isolates what the reader changes.

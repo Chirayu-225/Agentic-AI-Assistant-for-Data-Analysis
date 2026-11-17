@@ -3,7 +3,7 @@ test_local_upload.py — POST /upload + local:// ids: the no-Vercel-Blob path.
 Covers auth, streaming a large file, content-addressing, size cap, empty files,
 path-traversal ids, expiry, and that every endpoint family can read a local file.
 
-Run: python3 test_local_upload.py
+Run: python -m tests.api.test_local_upload
 """
 import io, os, shutil, sys, tempfile, time
 

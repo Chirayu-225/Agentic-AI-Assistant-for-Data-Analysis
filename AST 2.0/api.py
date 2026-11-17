@@ -50,7 +50,7 @@ from rag.rag_service import index_document, answer_question, get_insights
 from analysis.profile_service import get_profile, get_cleaning_report
 from data_cleaning.cleaning_agent import run_cleaning_agent
 from data_cleaning.fill_service import run_fill
-from audit import audit_service
+from data_cleaning import audit_service
 from data_cleaning import scale_service
 from analysis.auto_analyze_service import run_auto_analyze, answer_followup
 from analysis.multi_table_service import run_multi_table_query

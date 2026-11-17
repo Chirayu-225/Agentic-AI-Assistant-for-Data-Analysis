@@ -7,7 +7,7 @@ The agent asks a model for ONE fix script. Whatever the script does, the table t
 tidying and new flag columns stay. The response keeps every existing field and adds "applied", "reverted",
 "keptChanges" and "message". The fix prompt carries the hard rules.
 
-Run: python test_cleaning_agent_verifier.py
+Run: python -m tests.data_cleaning.test_cleaning_agent_verifier
 """
 import contextlib
 import io
@@ -52,10 +52,10 @@ def main():
     from storage import cache_layer
     from data_cleaning import cleaning_agent
     from ingestion import file_reader
-    from analysis import query_engine
+    from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
     from execution import sandbox_limits
     from data_cleaning.cleaning import rule_based_clean
-    from analysis.profiler import build_defect_fix_prompt
+    from data_cleaning.defect_prompts import build_defect_fix_prompt
 
     os.environ.pop("CACHE_ENABLED", None)
     data = sales_csv()
@@ -73,7 +73,7 @@ def main():
             if "Defects to fix" in prompt:
                 return fix_reasoning + "```python\n" + fix_code + "\n```"
             return DIAG
-        query_engine.llm_with_fallback = fake
+        llm_provider.llm_with_fallback = fake
 
     def stub_sandbox(transform):
         """The sandbox 'runs' the fix by applying `transform` to the table it is given."""

@@ -4,7 +4,7 @@ Checked with reference pipelines whose correct scores are known in advance (an o
 a do-nothing pipeline, one that flags everything, one that corrupts, one that silently
 drops rows), plus the adapter's row-to-line mapping and the frozen-run safeguards.
 Stdlib only; the final block exercises the real cleaner and runs only where pandas is installed.
-Run: python test_clean_score.py
+Run: python -m tests.evaluation.test_clean_score
 """
 import contextlib
 import datetime as dt

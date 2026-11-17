@@ -4,7 +4,7 @@ every answer type, tolerance edge cases, failure classification, Wilson
 intervals, repeat-consistency, template generation, question-file
 validation, and an end-to-end offline run with the shortcut solver.
 
-Run: python3 test_eval_harness.py
+Run: python -m tests.evaluation.test_eval_harness
 """
 
 import json

@@ -504,6 +504,19 @@ def llm_chat_call(prompt_text: str, temperature: float = 0.3) -> str:
         raise RuntimeError(f"LLM chat call failed: {e}") from e
 
 
+def llm_with_fallback(prompt_text: str, temperature: float = 0.1,
+                      primary: str = "openai/gpt-oss-20b", session_id: str = "",
+                      max_tokens: int = 2048) -> str:
+    """The code-model call every pipeline uses (cached per session; the fallback provider,
+    circuit breaker and request deadline all apply inside llm_code_call). `primary` is kept
+    for older callers and ignored.
+
+    Tests and the eval gate replace this by assigning to the module attribute of the module
+    that calls it: analysis code calls it through analysis.query_engine, the cleaning agent
+    through llm.llm_provider."""
+    return llm_code_call(prompt_text, temperature, session_id=session_id, max_tokens=max_tokens)
+
+
 def llm_uncached_code_call(prompt_text: str, temperature: float = 0.0, max_tokens: int = 2048) -> str:
     """One-shot code calls that must NOT be cached (cleaning retry, error retry)."""
     try:

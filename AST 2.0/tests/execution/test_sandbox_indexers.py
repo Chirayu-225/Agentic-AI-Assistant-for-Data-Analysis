@@ -9,7 +9,7 @@ running the evaluation harness against real model output:
 
 Every escape attempt below is run through the REAL sandbox (subprocess).
 
-Run: python3 test_sandbox_indexers.py
+Run: python -m tests.execution.test_sandbox_indexers
 """
 import os, sys, tempfile
 import pandas as pd

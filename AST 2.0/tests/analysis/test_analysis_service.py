@@ -20,7 +20,7 @@ WHAT THIS CANNOT TEST HERE (and why)
     exist, to get real coverage of the shortcut-query path. See the
     bottom of this file for exactly what to check.
 
-Run: python3 test_analysis_service.py
+Run: python -m tests.analysis.test_analysis_service
 """
 
 import io

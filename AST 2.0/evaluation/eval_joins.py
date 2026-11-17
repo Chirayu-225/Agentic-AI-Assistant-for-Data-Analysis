@@ -15,8 +15,8 @@ How an answer is scored:
   text    — the expected value appears in the first row.
 
 Usage:
-    python eval_joins.py               # needs GROQ_API_KEY
-    python eval_joins.py --repeat 3    # + consistency
+    python -m evaluation.eval_joins               # needs GROQ_API_KEY
+    python -m evaluation.eval_joins --repeat 3    # + consistency
 """
 from __future__ import annotations
 

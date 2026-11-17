@@ -33,7 +33,7 @@ ALREADY EXIST
     this session — with the same "prove it against real adversarial
     input, not a mock" standard the rest of this suite uses.
 
-Run: python3 test_sandbox_security.py
+Run: python -m tests.execution.test_sandbox_security
 """
 
 from __future__ import annotations

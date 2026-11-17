@@ -59,7 +59,7 @@ PLATFORM NOTE (part 2)
     option Python provides — if you hit that same RuntimeError running
     the real app locally on Windows, it's this exact issue, and the
     reliable places to verify this layer are (a) the standalone test
-    script, run directly with `python test_sandbox_limits.py`, and
+    script, run directly with `python -m tests.execution.test_sandbox_limits`, and
     (b) your actual Linux deployment target, where fork applies.
 
 WHY WINDOWS LOCAL DEV CAN HIT THE TIMEOUT ON ORDINARY QUERIES

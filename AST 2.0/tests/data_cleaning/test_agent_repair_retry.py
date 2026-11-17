@@ -6,7 +6,7 @@ whole fix was thrown away although every flag column in it was safe. Now the mod
 once. If the repaired code runs, it goes through the verifier like any other; if it fails again the user gets the same
 safe message as before. Never more than one repair. The model and the sandbox are stubbed; no Groq.
 
-Run: python test_agent_repair_retry.py
+Run: python -m tests.data_cleaning.test_agent_repair_retry
 """
 import contextlib
 import io
@@ -39,7 +39,7 @@ def main():
     from storage import cache_layer
     from data_cleaning import cleaning_agent
     from llm import llm_provider
-    from analysis import query_engine
+    from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
     from execution import sandbox_limits
 
     os.environ.pop("CACHE_ENABLED", None)
@@ -58,7 +58,7 @@ def main():
                 state["fix_prompts"].append(prompt)
                 return "REASONING:\n- state: flag the odd ones\n```python\n" + BAD_CODE + "\n```"
             return DIAG
-        query_engine.llm_with_fallback = fake_model
+        llm_provider.llm_with_fallback = fake_model
 
         def fake_repair(prompt, temperature=0.1, max_tokens=4096, **k):
             state["repair_prompts"].append(prompt)

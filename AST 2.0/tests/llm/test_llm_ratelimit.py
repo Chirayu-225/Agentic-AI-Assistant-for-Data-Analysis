@@ -1,7 +1,7 @@
 """
 test_llm_ratelimit.py — provider rate-limit (HTTP 429) handling in llm_provider,
 and how the eval harness treats a provider outage. No network, no API key:
-the provider call is stubbed. Run: python test_llm_ratelimit.py
+the provider call is stubbed. Run: python -m tests.llm.test_llm_ratelimit
 
 Covers: a short 429 is waited out and retried; a daily-quota 429 fails fast with
 a user-safe message (no organisation id) and does not burn the daily call

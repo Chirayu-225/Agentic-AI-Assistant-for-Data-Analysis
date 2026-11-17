@@ -22,10 +22,10 @@ computing answers, which made some questions unanswerable by anyone.)
 
 FRESH SETS: once a held-out set has been run and looked at, it is no
 longer unseen. Generate a new one with a new seed before quoting a number:
-    python build_heldout.py --seed 20261101
+    python -m eval_data.heldout.build_heldout --seed 20261101
 The seed used is written to seed.txt next to the files.
 
-Run: python build_heldout.py [--seed N]   (deterministic for a given seed)
+Run: python -m eval_data.heldout.build_heldout [--seed N]   (deterministic for a given seed)
 """
 
 from __future__ import annotations

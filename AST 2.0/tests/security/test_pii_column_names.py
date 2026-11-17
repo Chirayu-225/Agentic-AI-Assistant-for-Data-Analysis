@@ -3,7 +3,7 @@ test_pii_column_names.py — personal columns are recognised even when the name 
 
 The sales sample has CONTACTFIRSTNAME, CONTACTLASTNAME, ADDRESSLINE1 and ADDRESSLINE2. The token rules only split at
 separators and camelCase, so these run-together names matched nothing and their values went to the model; only PHONE was
-withheld. Run: python test_pii_column_names.py
+withheld. Run: python -m tests.security.test_pii_column_names
 """
 from security import pii_redaction as pii
 

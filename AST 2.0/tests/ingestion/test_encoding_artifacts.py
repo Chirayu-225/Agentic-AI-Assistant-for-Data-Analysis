@@ -2,7 +2,7 @@
 test_encoding_artifacts.py — detect_encoding.find_encoding_artifacts: wrong-charset text (C1 control characters and
 UTF-8-read-as-cp1252 mojibake) is flagged, one card per column; genuine accented text is not.
 
-Pure function, no LLM, no sandbox, no network. Run: python test_encoding_artifacts.py
+Pure function, no LLM, no sandbox, no network. Run: python -m tests.ingestion.test_encoding_artifacts
 """
 import glob
 import os

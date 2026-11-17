@@ -49,7 +49,7 @@ check("a second run finds nothing", sr.apply_scale_fix(new, ["quantity"])[1] == 
 check("dtype stays whole numbers", pd.api.types.is_integer_dtype(new["quantity"]))
 
 # end to end: the apply step, then the audit explains each changed cell
-from audit import audit_service as svc
+from data_cleaning import audit_service as svc
 from data_cleaning import scale_service
 csv = df.to_csv(index=False).encode()
 S, U = "s-scale-1", "local://scale-test"

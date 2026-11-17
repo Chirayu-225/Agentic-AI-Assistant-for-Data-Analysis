@@ -333,13 +333,13 @@ def _run_cleaning_agent(
 
     try:
         from data_cleaning.cleaning import rule_based_clean
-        from analysis.profiler import (
+        from data_cleaning.defect_prompts import (
             build_defect_profile,
             format_defect_profile_for_llm,
             build_defect_diagnosis_prompt,
             build_defect_fix_prompt,
         )
-        from analysis.query_engine import llm_with_fallback
+        from llm.llm_provider import llm_with_fallback
         from execution.sandbox_limits import run_sandboxed
 
         from storage.cache_layer import cached_rule_clean

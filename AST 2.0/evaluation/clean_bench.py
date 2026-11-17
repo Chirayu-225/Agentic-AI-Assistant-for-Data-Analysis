@@ -50,8 +50,8 @@ DEV vs FROZEN
     tripwire, not a lock (the generator is committed, so anyone can regenerate
     the frozen data).
 
-    python clean_bench.py build  [--profile full|mini|coverage] [--out DIR]
-    python clean_bench.py verify [--profile full]      # regenerate, compare to MANIFEST.json
+    python -m evaluation.clean_bench build  [--profile full|mini|coverage] [--out DIR]
+    python -m evaluation.clean_bench verify [--profile full]      # regenerate, compare to MANIFEST.json
 """
 
 from __future__ import annotations

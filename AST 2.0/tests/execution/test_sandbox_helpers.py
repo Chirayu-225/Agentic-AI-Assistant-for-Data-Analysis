@@ -4,7 +4,7 @@ allowlist after the held-out eval (np.issubdtype / np.number, pd.api.types
 predicates, series.name, np.triu), run through the REAL sandbox, plus checks
 that the widening didn't open anything else.
 
-Run: python test_sandbox_helpers.py
+Run: python -m tests.execution.test_sandbox_helpers
 """
 import sys
 

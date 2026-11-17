@@ -2,7 +2,7 @@
 test_data_checks_endpoint.py — POST /data-checks, driven through the real FastAPI app with TestClient (no server, no
 network, no Groq). File loading is stubbed; the check itself is the real data_checks module.
 
-Run: python test_data_checks_endpoint.py
+Run: python -m tests.api.test_data_checks_endpoint
 """
 import os
 import tempfile

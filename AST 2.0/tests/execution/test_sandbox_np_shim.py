@@ -6,7 +6,7 @@ boolean, category, tz-aware datetime) with every kind. The sandbox's np proxy (a
 pandas.api.types for np.number / np.integer / np.floating / np.datetime64, and only when the first argument is a pandas
 ExtensionDtype. Anything else re-raises numpy's own TypeError. Global numpy is never patched.
 
-No LLM, no network. Run: python test_sandbox_np_shim.py
+No LLM, no network. Run: python -m tests.execution.test_sandbox_np_shim
 """
 import sys
 

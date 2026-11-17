@@ -10,7 +10,7 @@ test_api_error_handler.py — the API never shows an exception, a path or a file
     np.object_, which the sandbox shim deliberately does not paper over) gets one repair attempt (LLM stubbed, no
     Groq), and the final user-facing error has no "Traceback", no ".py" and no "C:\\".
 
-No LLM, no network. Run: python test_api_error_handler.py
+No LLM, no network. Run: python -m tests.api.test_api_error_handler
 """
 
 import os as _os

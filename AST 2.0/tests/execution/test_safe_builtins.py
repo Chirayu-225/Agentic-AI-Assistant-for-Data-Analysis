@@ -10,7 +10,7 @@ Confirms:
      getattr/setattr/delattr, vars, dir) is STILL blocked — this fix
      widens the allowlist, it does not loosen the AST/pattern guards.
 
-Run: python3 test_safe_builtins.py
+Run: python -m tests.execution.test_safe_builtins
 """
 
 from execution.sandbox import safe_exec

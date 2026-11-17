@@ -3,7 +3,7 @@ test_csv_error_messages.py — a file that cannot be read must give the user ONE
 exception text (which can carry a traceback or a server path). The reader is stubbed to raise; no files, no network,
 no LLM calls.
 
-Run: python test_csv_error_messages.py
+Run: python -m tests.analysis.test_csv_error_messages
 """
 import contextlib
 import io

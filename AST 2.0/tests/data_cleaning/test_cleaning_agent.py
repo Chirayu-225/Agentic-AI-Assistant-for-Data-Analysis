@@ -30,13 +30,13 @@ WHAT THIS CANNOT TEST HERE (and why)
     RUN THIS ON YOUR MACHINE for a real end-to-end run including actual
     model reasoning.
 
-Run: python3 test_cleaning_agent.py
+Run: python -m tests.data_cleaning.test_cleaning_agent
 """
 
 import pandas as pd
 
 from data_cleaning.cleaning_agent import _parse_defects, _parse_fix_response
-from analysis.profiler import build_defect_profile, format_defect_profile_for_llm
+from data_cleaning.defect_prompts import build_defect_profile, format_defect_profile_for_llm
 from execution.sandbox_limits import run_sandboxed
 
 

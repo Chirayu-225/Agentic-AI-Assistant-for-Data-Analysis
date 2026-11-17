@@ -6,7 +6,7 @@ server log only, and the diagnosis stays visible. Also checks that the fix
 prompt carries the "iterating a DataFrame gives column names" hint.
 
 The LLM is stubbed everywhere (and the real provider call is made to fail
-loudly, so a stray Groq call cannot happen). Run: python test_cleaning_agent_failure.py
+loudly, so a stray Groq call cannot happen). Run: python -m tests.data_cleaning.test_cleaning_agent_failure
 """
 import contextlib
 import io
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from llm import llm_provider
-from analysis import query_engine
+from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
 
 FAIL = []
 
@@ -49,7 +49,7 @@ def stub_llm(fix_code):
         if "Defects to fix" in prompt:
             return "REASONING:\n- country: normalise spellings\n```python\n" + fix_code + "\n```"
         return DIAG
-    query_engine.llm_with_fallback = fake
+    llm_provider.llm_with_fallback = fake
 
 
 def run_agent():
@@ -74,7 +74,7 @@ def main():
     from execution import sandbox_limits
     real_run_sandboxed = sandbox_limits.run_sandboxed
     real_read_csv = cleaning_agent._read_csv
-    real_llm = query_engine.llm_with_fallback
+    real_llm = llm_provider.llm_with_fallback
 
     try:
         print("=" * 70)
@@ -123,7 +123,7 @@ def main():
 
         def exploding_llm(*a, **k):
             raise RuntimeError("boom: key file C:\\Users\\secret\\key.py unreadable")
-        query_engine.llm_with_fallback = exploding_llm
+        llm_provider.llm_with_fallback = exploding_llm
         r, log = run_agent()
         check("the run fails", r.get("success") is False)
         check("the user sees a short safe message", r.get("error") == cleaning_agent._SAFE_AGENT_ERROR
@@ -149,7 +149,7 @@ def main():
         print("\n" + "=" * 70)
         print("PART 6 — the fix prompt carries the column-names hint")
         print("=" * 70)
-        from analysis.profiler import build_defect_fix_prompt
+        from data_cleaning.defect_prompts import build_defect_fix_prompt
         prompt = build_defect_fix_prompt([{"type": "outlier", "column": "x", "evidence": "e", "action": "a"}], "x, y")
         check("prompt says iterating a DataFrame gives column names", "for c in df.columns" in prompt and "column NAMES" in prompt)
         check("prompt says to use df[c]", "use df[c]" in prompt)
@@ -158,7 +158,7 @@ def main():
     finally:
         sandbox_limits.run_sandboxed = real_run_sandboxed
         cleaning_agent._read_csv = real_read_csv
-        query_engine.llm_with_fallback = real_llm
+        llm_provider.llm_with_fallback = real_llm
 
     print()
     if FAIL:

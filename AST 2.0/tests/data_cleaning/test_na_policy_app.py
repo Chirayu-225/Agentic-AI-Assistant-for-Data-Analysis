@@ -5,7 +5,7 @@ The literal text "NA" / "None" is a real value in a column such as TERRITORY (NA
 marker in a numeric or date column. Library code defaults to the legacy behaviour; the app asks for "safe" at ONE choke
 point (file_reader.read_tabular_file, and cache_layer.cached_rule_clean for the cleaner).
 
-Works on pandas 2.x and 3.x. No LLM, no network. Run: python test_na_policy_app.py
+Works on pandas 2.x and 3.x. No LLM, no network. Run: python -m tests.data_cleaning.test_na_policy_app
 """
 import ast
 import contextlib
@@ -230,9 +230,9 @@ def main():
     check("the report has no 'territory ... missing value' warning", not any("'territory' has" in line for line in log))
 
     # ---- who may call the legacy reader ------------------------------------------------------------------------
-    allowed = {"file_reader.py", "clean_adapter_legacy.py", "exp_run.py"}
+    allowed = {"file_reader.py", "clean_adapter_legacy.py"}
     offenders = []
-    skip_dirs = {"astfs", "node_modules", "__pycache__", "legacy_streamlit", "eval_data", "chroma_data", "logs", ".git"}
+    skip_dirs = {"astfs", "node_modules", "__pycache__", "eval_data", "chroma_data", "logs", ".git"}
     for root, dirs, files in os.walk(HERE):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for name in files:
@@ -247,7 +247,7 @@ def main():
                 if ident == "_read_tabular_file_uncached":
                     offenders.append(os.path.relpath(os.path.join(root, name), HERE))
                     break
-    check("only file_reader.py, clean_adapter_legacy.py and exp_run.py use _read_tabular_file_uncached",
+    check("only file_reader.py and clean_adapter_legacy.py use _read_tabular_file_uncached",
           not offenders, str(offenders))
 
     print()

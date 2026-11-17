@@ -4,7 +4,7 @@ test_client_ip.py — the caller address used for rate limiting must not be spoo
 X-Forwarded-For is "client, proxy1, proxy2": each trusted proxy appends the address it saw,
 so only entries counted from the RIGHT can be trusted. The first entry is attacker-controlled.
 
-Run: python3 test_client_ip.py
+Run: python -m tests.api.test_client_ip
 """
 import os, sys, tempfile
 

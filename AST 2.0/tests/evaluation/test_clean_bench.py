@@ -5,7 +5,7 @@ generator against the files it writes: every label's (line, column) really
 holds the value the label says; each row carries at most one injected defect;
 decoys never overlap defects; dev and frozen vocabularies are disjoint; the
 generator is deterministic and shares no code with the pipeline; the manifest
-tripwire fires on change. Stdlib only.   Run: python test_clean_bench.py
+tripwire fires on change. Stdlib only.   Run: python -m tests.evaluation.test_clean_bench
 """
 import ast
 import csv

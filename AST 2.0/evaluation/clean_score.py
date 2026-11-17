@@ -4,8 +4,8 @@ clean_score.py — scores any cleaning pipeline against the clean_bench ground t
 A pipeline is a function  run(case_id, data: bytes, companions: dict) -> prediction doc
 (see clean_adapt.py). It sees only the dirty file and companion tables, never the labels.
 
-    python clean_score.py --adapter legacy              # dev split
-    python clean_score.py --adapter legacy --frozen     # frozen split, guarded (see below)
+    python -m evaluation.clean_score --adapter legacy              # dev split
+    python -m evaluation.clean_score --adapter legacy --frozen     # frozen split, guarded (see below)
 
 METRICS (per defect type, always with sample counts; there is deliberately no headline number)
     detected     the pipeline did something at the labelled place

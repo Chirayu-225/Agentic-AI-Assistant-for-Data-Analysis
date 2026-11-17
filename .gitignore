@@ -60,7 +60,7 @@ pnpm-debug.log*
 Thumbs.db
 desktop.ini
 
-# Generated cleaning-benchmark data (regenerate with: python clean_bench.py build). MANIFEST.json IS committed.
+# Generated cleaning-benchmark data (regenerate from "AST 2.0" with: python -m evaluation.clean_bench build). MANIFEST.json IS committed.
 AST 2.0/eval_data/clean_bench/generated/
 
 # Pre-restructure safety backup (kept locally, never committed)

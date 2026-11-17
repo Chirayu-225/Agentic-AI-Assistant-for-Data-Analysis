@@ -12,7 +12,7 @@ extracted table decodes and flows through file_reader.py + cleaning.py
 — the SAME pipeline a regular CSV upload goes through — not a
 separate, unverified code path.
 
-Run: python3 test_table_extraction.py
+Run: python -m tests.ingestion.test_table_extraction
 """
 
 import io

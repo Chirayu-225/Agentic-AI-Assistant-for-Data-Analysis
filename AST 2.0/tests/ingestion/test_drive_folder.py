@@ -4,7 +4,7 @@ test_drive_folder.py — importing several files from Google Drive: a folder lin
 Google is replaced by a fake HTTP client that answers by URL, so no network is used. What must hold: a single file link still
 behaves exactly as before; a folder is listed (official API with a key, public embedded view without) and its CSV / Excel /
 Google Sheet files imported; one bad file never sinks the rest; limits apply; and the API key never appears anywhere the user
-can see. Run: python test_drive_folder.py
+can see. Run: python -m tests.ingestion.test_drive_folder
 """
 import os
 import tempfile

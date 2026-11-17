@@ -11,7 +11,7 @@ When na_policy exists, an explicit na_policy="legacy" must give exactly the same
 The hashes are specific to the installed pandas (pandas 3.0.5 here); on another pandas version the test prints
 [SKIPPED] for the constants and only checks that default and explicit "legacy" agree.
 
-No LLM, no network. Run: python test_na_policy_golden.py
+No LLM, no network. Run: python -m tests.data_cleaning.test_na_policy_golden
 """
 import hashlib
 import inspect

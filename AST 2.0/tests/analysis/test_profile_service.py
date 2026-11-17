@@ -5,7 +5,7 @@ Unlike analysis_service.py / rag_service.py, this module has zero
 streamlit dependency, so this test runs COMPLETELY here — no [SKIPPED]
 sections, no "run this on your machine" caveat needed for the core logic.
 
-Run: python3 test_profile_service.py
+Run: python -m tests.analysis.test_profile_service
 """
 
 from analysis.profile_service import get_profile, get_cleaning_report

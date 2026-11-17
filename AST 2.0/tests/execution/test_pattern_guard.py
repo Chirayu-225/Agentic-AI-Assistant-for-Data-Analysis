@@ -1,5 +1,5 @@
 """test_pattern_guard.py — the string-level guard must not reject legitimate column
-names, and must still reject real attacks.   Run: python3 test_pattern_guard.py"""
+names, and must still reject real attacks.   Run: python -m tests.execution.test_pattern_guard"""
 import sys
 from execution.sandbox import is_code_safe, is_code_safe_patterns
 FAIL=[]

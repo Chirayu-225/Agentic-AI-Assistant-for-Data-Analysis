@@ -2,7 +2,7 @@
 test_error_scrub.py — error_scrub.scrub_error_text / scrub_result: no traceback, file path or file name reaches the
 user, while useful model-code feedback ("KeyError: 'sales'") stays.
 
-Pure, stdlib only, no network. Run: python test_error_scrub.py
+Pure, stdlib only, no network. Run: python -m tests.security.test_error_scrub
 """
 import copy
 import sys

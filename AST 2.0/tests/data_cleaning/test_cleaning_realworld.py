@@ -4,7 +4,7 @@ held-out eval exposed (eval_data/heldout/). Deliberately uses DIFFERENT data
 from the held-out files, so these fixes are tested on the general problem,
 not tuned to the held-out answers.
 
-Run: python test_cleaning_realworld.py
+Run: python -m tests.data_cleaning.test_cleaning_realworld
 """
 import sys
 

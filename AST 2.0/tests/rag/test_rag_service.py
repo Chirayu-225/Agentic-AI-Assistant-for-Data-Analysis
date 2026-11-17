@@ -13,7 +13,7 @@ failure paths that need no embedding model and no LLM:
 PART 2 (opt-in): the full index -> answer round trip. It needs the sentence-transformers embedding model (a download
   on first use) and a live LLM, so it only runs with RAG_FULL_TEST=1. Otherwise it prints [SKIPPED].
 
-Run: python test_rag_service.py        (full round trip: set RAG_FULL_TEST=1)
+Run: python -m tests.rag.test_rag_service        (full round trip: set RAG_FULL_TEST=1)
 """
 import os
 import sys

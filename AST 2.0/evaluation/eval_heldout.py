@@ -12,9 +12,9 @@ question fails, write a NEW dev question that reproduces the failure and
 fix against that instead.
 
 Usage:
-    python eval_heldout.py                      # real LLM pipeline (GROQ_API_KEY)
-    python eval_heldout.py --solver shortcut    # offline, no-LLM baseline
-    python eval_heldout.py --repeat 3           # also measures consistency (recommended
+    python -m evaluation.eval_heldout                      # real LLM pipeline (GROQ_API_KEY)
+    python -m evaluation.eval_heldout --solver shortcut    # offline, no-LLM baseline
+    python -m evaluation.eval_heldout --repeat 3           # also measures consistency (recommended
                                                 # before quoting a number: one run can be lucky)
 """
 

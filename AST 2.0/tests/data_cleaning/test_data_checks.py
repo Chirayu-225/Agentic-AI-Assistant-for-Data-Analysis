@@ -3,7 +3,7 @@ test_data_checks.py — data_checks.check_dataframe: the format check (drift / v
 encoding cards, merged under one cap and one ranking.
 
 Hand-made, deterministic fixtures: no random numbers, no files, no rates. Pure functions, no LLM, no sandbox, no network.
-Run: python test_data_checks.py
+Run: python -m tests.data_cleaning.test_data_checks
 """
 import ast
 import copy

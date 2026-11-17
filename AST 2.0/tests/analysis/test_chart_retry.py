@@ -1,5 +1,5 @@
 """test_chart_retry.py — a chart whose first code is blocked gets one repair retry.
-Run: python3 test_chart_retry.py"""
+Run: python -m tests.analysis.test_chart_retry"""
 import sys, types
 import pandas as pd
 # llm_provider imports streamlit/groq at module load; the model call is replaced

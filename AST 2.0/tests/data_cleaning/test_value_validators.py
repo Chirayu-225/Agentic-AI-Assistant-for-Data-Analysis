@@ -2,7 +2,7 @@
 test_value_validators.py — value_validators.py: what each rule repairs, and (as important) when it must do NOTHING.
 
 The near-duplicate rule once dropped a legitimate row because ORD-000601 and ORD-000194 look alike as strings; the
-"must abstain" tests below exist so that kind of mistake cannot come back. Run: python test_value_validators.py
+"must abstain" tests below exist so that kind of mistake cannot come back. Run: python -m tests.data_cleaning.test_value_validators
 """
 import datetime as dt
 

@@ -11,7 +11,7 @@ Architecture:
 import re
 import pandas as pd
 
-from llm.llm_provider import llm_code_call, llm_chat_call
+from llm.llm_provider import llm_chat_call, llm_with_fallback  # noqa: F401  (re-exported: analysis code and the eval gate patch it here)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -389,12 +389,6 @@ Output ONLY the corrected Python code block. No explanations.
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. LLM CALLS — backed by llm_provider (Groq API)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def llm_with_fallback(prompt_text: str, temperature: float = 0.1,
-                      primary: str = "openai/gpt-oss-20b", session_id: str = "",
-                      max_tokens: int = 2048) -> str:
-    return llm_code_call(prompt_text, temperature, session_id=session_id, max_tokens=max_tokens)
-
 
 def insight_llm(prompt_text: str, temperature: float = 0.3) -> str:
     return llm_chat_call(prompt_text, temperature)

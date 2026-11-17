@@ -4,7 +4,7 @@ validation, false-positive resistance, column-name withholding, the
 DataFrame scan behind /profile's piiReport, the optional NER hook, and a
 check that the real prompt builders actually apply all of it.
 
-Run: python3 test_pii_detection.py
+Run: python -m tests.security.test_pii_detection
 """
 
 import os
@@ -101,8 +101,8 @@ df = pd.DataFrame({
     "amount": [120.5, 300.0, 99.9, 120.5],
 })
 
-from analysis.profiler import (build_dataset_profile, format_profile_for_llm,
-                      build_defect_profile, format_defect_profile_for_llm)
+from analysis.profiler import build_dataset_profile, format_profile_for_llm
+from data_cleaning.defect_prompts import build_defect_profile, format_defect_profile_for_llm
 
 for fmt_name, text in (
     ("dataset profile", format_profile_for_llm(build_dataset_profile(df))),

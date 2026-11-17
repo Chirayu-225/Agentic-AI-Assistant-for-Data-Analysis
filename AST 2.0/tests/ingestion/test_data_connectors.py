@@ -2,7 +2,7 @@
 test_data_connectors.py - Google Drive / MySQL import for the Join SQL Analysis tab.
 
 No network and no MySQL server needed: Google is replaced by a fake HTTP client and MySQL by a
-fake connection. Run: python3 test_data_connectors.py
+fake connection. Run: python -m tests.ingestion.test_data_connectors
 """
 import io, os, sys, tempfile
 

@@ -6,7 +6,7 @@ no evidence, the column median. What it cannot fill becomes a QUESTION for the u
 the response lists it, and the user's per-column answer goes through fill_service.run_fill(unknown_columns=[...]).
 The fill happens in EVERY path: fix applied, fix failed, no defects found. The model and sandbox are stubbed; no Groq.
 
-Run: python test_agent_fill.py
+Run: python -m tests.data_cleaning.test_agent_fill
 """
 import contextlib
 import io
@@ -53,7 +53,7 @@ def main():
     from data_cleaning import cleaning_agent
     from data_cleaning import fill_service
     from llm import llm_provider
-    from analysis import query_engine
+    from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
     from execution import sandbox_limits
     from storage import session_cache
 
@@ -68,7 +68,7 @@ def main():
             if "Defects to fix" in prompt:
                 return "REASONING:\n- note: look at it\n```python\n" + fix + "\n```"
             return diag
-        query_engine.llm_with_fallback = fake_model
+        llm_provider.llm_with_fallback = fake_model
         llm_provider.llm_uncached_code_call = lambda prompt, **k: "no code here"
 
         def fake_sandbox(code, df, include_charts=False, timeout_seconds=20, **k):

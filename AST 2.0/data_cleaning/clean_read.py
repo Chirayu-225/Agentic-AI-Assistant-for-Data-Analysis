@@ -2,7 +2,7 @@
 clean_read.py — Stage 0: read a delimited file into a table of RAW STRINGS with source coordinates,
 and report what it found about the file's structure. It never crashes and never types anything.
 
-    python clean_read.py FILE        # prints the structure report (a quick smoke test on a real export)
+    python -m data_cleaning.clean_read FILE        # prints the structure report (a quick smoke test on a real export)
 
 WHAT IT RETURNS (a plain dict; see read())
     status      "ok" | "unreadable" (with a reason and how many lines were parsed)
@@ -403,6 +403,6 @@ def report(res: dict) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("usage: python clean_read.py FILE")
+        raise SystemExit("usage: python -m data_cleaning.clean_read FILE")
     with open(sys.argv[1], "rb") as f:
         print(report(read(f.read())))

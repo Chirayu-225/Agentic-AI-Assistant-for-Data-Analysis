@@ -5,7 +5,7 @@ per-session 429 + Retry-After, per-IP backstop, result caching, piiReport in
 /profile, /admin/stats, that remote URLs are refused (SSRF), and that the
 audit log never contains file contents.
 
-Run: python3 test_api_hardening.py
+Run: python -m tests.api.test_api_hardening
 """
 import json, os, shutil, sys, tempfile
 

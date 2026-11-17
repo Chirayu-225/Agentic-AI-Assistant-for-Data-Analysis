@@ -2,7 +2,7 @@
 test_query_retry.py — the query panel's one repair retry (analysis_service),
 with the LLM stubbed: a failing first attempt is shown to the model with its
 error and the repaired code runs; a second failure reports both errors; a
-success needs no retry. Run: python test_query_retry.py
+success needs no retry. Run: python -m tests.analysis.test_query_retry
 """
 
 import os as _os

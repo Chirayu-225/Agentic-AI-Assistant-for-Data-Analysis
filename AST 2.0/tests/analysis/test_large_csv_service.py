@@ -43,7 +43,7 @@ WHAT THIS PROVES, END TO END, WITH NO MOCKING OF THE SANDBOX ITSELF
     - A nonexistent file path fails cleanly (a normal SandboxResult
       error), not with an unhandled exception escaping the worker.
 
-Run: python3 test_large_csv_service.py
+Run: python -m tests.analysis.test_large_csv_service
 """
 
 import os

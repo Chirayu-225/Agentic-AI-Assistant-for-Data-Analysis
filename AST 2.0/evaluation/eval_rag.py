@@ -20,7 +20,7 @@ Text is compared after Unicode normalisation, so a model writing
 "8\u202fhours" (narrow no-break space) or "₹" variants is not marked
 wrong for formatting.
 
-Usage: python eval_rag.py   (needs GROQ_API_KEY; indexes locally)
+Usage: python -m evaluation.eval_rag   (needs GROQ_API_KEY; indexes locally)
 """
 
 from __future__ import annotations

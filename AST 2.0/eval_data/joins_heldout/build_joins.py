@@ -12,9 +12,9 @@ The questions deliberately include the classic join traps:
   * ANTI-JOINS: "never ordered" questions need LEFT JOIN ... IS NULL.
 
 RULE: never tune prompts against these files. Regenerate with a new seed
-before quoting a number:  python build_joins.py --seed N
+before quoting a number:  python -m eval_data.joins_heldout.build_joins --seed N
 
-Run: python build_joins.py [--seed N]
+Run: python -m eval_data.joins_heldout.build_joins [--seed N]
 """
 from __future__ import annotations
 

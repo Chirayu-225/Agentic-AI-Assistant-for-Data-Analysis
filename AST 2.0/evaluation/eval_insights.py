@@ -11,7 +11,7 @@ Reports, per dataset and pooled:
     a bug in the pipeline's own bookkeeping can't make it grade itself
   - latency
 
-Usage: python eval_insights.py   (needs GROQ_API_KEY)
+Usage: python -m evaluation.eval_insights   (needs GROQ_API_KEY)
 """
 
 from __future__ import annotations

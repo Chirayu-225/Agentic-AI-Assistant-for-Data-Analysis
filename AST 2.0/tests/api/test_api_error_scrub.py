@@ -8,7 +8,7 @@ client, while the final exception line stays. Services are stubbed (no network, 
   * a success response is returned unchanged
   * the upload error ("Upload failed: ...") no longer carries a disk path; the 413 / 400 wording is unchanged
 
-Run: python test_api_error_scrub.py
+Run: python -m tests.api.test_api_error_scrub
 """
 import os
 import shutil

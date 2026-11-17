@@ -3,7 +3,7 @@ test_clean_schema.py — the cleaning pipeline's contracts (clean_schema.py):
 source-coordinate row ids, the proposal object and its tier/default rules,
 declarative-op validation, the LLM evidence packet (token budget, column cap,
 sanitising, no raw values), declared-effect verification, the contract circuit
-breaker and the size cap. No pandas, no network. Run: python test_clean_schema.py
+breaker and the size cap. No pandas, no network. Run: python -m tests.data_cleaning.test_clean_schema
 """
 import json
 import os

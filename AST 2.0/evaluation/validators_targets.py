@@ -38,7 +38,7 @@ BENCHMARK ADDITIONS NEEDED BEFORE ANY DETECTOR (new profile "validators"; existi
   decoy   padded_fixed_width   fixed-width codes where the padding is meaningful (trimming would damage them)
   Sizes (per split, counted in COLUMNS): see NEW_BENCH_MIN_LABELS. They come from the false-alarm gate: a zero-hit result
   clears a 5% bar only from n = 73, so a decoy type with fewer columns could never be gated.
-  Constraint: the generator change must leave every existing case unchanged. `python clean_bench.py verify` and the
+  Constraint: the generator change must leave every existing case unchanged. `python -m evaluation.clean_bench verify` and the
   experiment's data hash in PREREG.json must still match. The frozen split has never been scored, so extending it
   is allowed now and only now.
 

@@ -6,7 +6,7 @@ TERRITORY (EMEA / NA / APAC / Japan, NA = North America) that erases real values
 whether an ambiguous token ("na" / "none", any case) is a missing-value MARKER or a real VALUE, and puts real values
 back after the normal read. Every other pandas NA token ("N/A", "null", "#N/A", ...) stays missing.
 
-Works on pandas 2.x and 3.x. No LLM, no network. Run: python test_missing_tokens.py
+Works on pandas 2.x and 3.x. No LLM, no network. Run: python -m tests.data_cleaning.test_missing_tokens
 """
 import csv
 import io

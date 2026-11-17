@@ -18,7 +18,7 @@ Confirms:
      while the same session asking twice DOES hit the cache (no wasted
      API call).
 
-Run: python test_isolation.py
+Run: python -m tests.rag.test_isolation
 """
 
 import sys

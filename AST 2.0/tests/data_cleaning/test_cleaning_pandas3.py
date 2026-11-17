@@ -12,7 +12,7 @@ stayed text. It also produced a spurious "<col>_original" side column.
 Also locks the wording of the month-first / day-first date notes (a second
 number above 12 can only be a DAY, not a month).
 
-No LLM, no sandbox, no network. Run: python test_cleaning_pandas3.py
+No LLM, no sandbox, no network. Run: python -m tests.data_cleaning.test_cleaning_pandas3
 """
 import sys
 

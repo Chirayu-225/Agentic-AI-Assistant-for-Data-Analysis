@@ -7,7 +7,7 @@ that reuses an existing name) and fixes that MUST pass (whitespace tidying, case
 column, a new boolean flag column with nulls, "1" -> 1.0, a date reformatted to the same date). Plus a mixed fix, the
 global tripwire (a simulated verifier bug), escaping, exact counts, speed and "inputs never mutated".
 
-No LLM, no sandbox, no network. Run: python test_agent_verify.py
+No LLM, no sandbox, no network. Run: python -m tests.data_cleaning.test_agent_verify
 """
 import sys
 import time

@@ -3,7 +3,7 @@ test_cache_layer.py — the bounded TTL/LRU caches and what hangs off them:
 parse caching in file_reader, rule-clean caching, deterministic-result
 caching. Includes a real timing measurement on a real Excel file.
 
-Run: python3 test_cache_layer.py
+Run: python -m tests.storage.test_cache_layer
 """
 
 import io

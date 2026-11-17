@@ -5,7 +5,7 @@ Evidence first: a blank is filled from other rows only when another column PROVE
 99% of the rows that have both values, is shown by at least 5 repeated groups, and every known row of the group agrees).
 Numbers with no evidence get their column's median. Text with no evidence stays blank unless "Unknown" is asked for.
 Dates, true/false columns, empty columns and identifier-like columns are never filled. No model is involved.
-Run: python test_fill_missing.py
+Run: python -m tests.data_cleaning.test_fill_missing
 """
 import io
 import os

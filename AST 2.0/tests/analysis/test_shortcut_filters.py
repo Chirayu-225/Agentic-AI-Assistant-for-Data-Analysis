@@ -3,7 +3,7 @@ test_shortcut_filters.py — shortcuts must never answer a question that
 restricts rows (found by the held-out eval: "total amount of overdue
 invoices" returned the grand total), and the code-generation schema must
 carry exact value spellings. Dev data only — not the held-out files.
-Run: python test_shortcut_filters.py
+Run: python -m tests.analysis.test_shortcut_filters
 """
 import sys
 

@@ -2,7 +2,7 @@
 test_cleaning_report_nulls.py — the cleaning report's AFTER null count ignores the cleaner's "<col>_original" side
 columns (blank by design), while the column count still includes them and the BEFORE count is unchanged.
 
-No LLM, no network. Run: python test_cleaning_report_nulls.py
+No LLM, no network. Run: python -m tests.analysis.test_cleaning_report_nulls
 """
 import sys
 

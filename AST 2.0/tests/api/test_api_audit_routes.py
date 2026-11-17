@@ -1,5 +1,5 @@
 """The three audit routes end to end through FastAPI: auth, bad input, the trail, the CSV and the duplicate choice.
-Skips (exit 0) when fastapi is not installed. Run: python test_api_audit_routes.py"""
+Skips (exit 0) when fastapi is not installed. Run: python -m tests.api.test_api_audit_routes"""
 import os, sys, tempfile
 
 try:

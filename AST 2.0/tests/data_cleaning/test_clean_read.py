@@ -4,7 +4,7 @@ heuristics are not shaped by the dev split. Covers every case in the design revi
 vs ragged, footers before ragged, ragged extra / short fields, the ragged circuit breaker, padded titles,
 thin-margin asks that show the candidate lines, headerless files, blank/duplicate headers, repeated
 headers, two-level headers, quoted newlines (physical start lines), encodings, delimiters, identifier
-hints, and "never crashes". Run: python test_clean_read.py
+hints, and "never crashes". Run: python -m tests.data_cleaning.test_clean_read
 """
 import csv
 import io

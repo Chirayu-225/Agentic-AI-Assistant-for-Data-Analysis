@@ -6,7 +6,7 @@ Confirms:
   2. Ordinary analysis code (the kind query_engine.py's prompt asks the
      LLM to generate) still works exactly as before.
 
-Run: python3 test_sandbox_proxy.py
+Run: python -m tests.execution.test_sandbox_proxy
 """
 
 import pandas as pd

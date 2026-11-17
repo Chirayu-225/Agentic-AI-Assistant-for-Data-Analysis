@@ -3,7 +3,7 @@ test_stage0_bridge.py — the structure-only bridge (stage0_bridge.py) and its w
 
 What must hold: a clean file is returned untouched (None); structure defects are repaired and reported; anything unsure,
 too big, switched off or crashing leaves the file alone; the legacy read path never calls the bridge.
-Run: python test_stage0_bridge.py
+Run: python -m tests.data_cleaning.test_stage0_bridge
 """
 import glob
 import io

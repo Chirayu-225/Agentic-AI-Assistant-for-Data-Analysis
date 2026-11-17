@@ -1,7 +1,7 @@
 """
 test_insight_verifier.py — insight_verifier.py: number matching, numbers
 stored as text, and the wording checks added after the insight eval.
-No LLM needed. Run: python test_insight_verifier.py
+No LLM needed. Run: python -m tests.analysis.test_insight_verifier
 """
 import sys
 

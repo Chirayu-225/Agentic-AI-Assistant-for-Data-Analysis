@@ -4,10 +4,10 @@ eval.py — Evaluation & benchmarking harness for Analyst Assistant.
 Tests deterministic components only (no LLM calls needed).
 
 Usage:
-    python eval.py                          # all suites, built-in data
-    python eval.py --csv path/to/data.csv  # use your own CSV
-    python eval.py --suite shortcuts        # one suite only
-    python eval.py --verbose               # show generated code
+    python -m evaluation.eval                          # all suites, built-in data
+    python -m evaluation.eval --csv path/to/data.csv  # use your own CSV
+    python -m evaluation.eval --suite shortcuts        # one suite only
+    python -m evaluation.eval --verbose               # show generated code
 """
 
 import sys

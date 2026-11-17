@@ -9,7 +9,7 @@ Confirms:
   4. A matplotlib chart result survives the process boundary (the one
      documented risk in sandbox_limits.py).
 
-Run: python3 test_sandbox_limits.py
+Run: python -m tests.execution.test_sandbox_limits
 """
 
 import time

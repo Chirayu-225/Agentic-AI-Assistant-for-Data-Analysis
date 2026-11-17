@@ -3,7 +3,7 @@ test_shortcut_guard.py — the no-LLM shortcut layer must answer only plain
 whole-column questions. Before this fix, "list the regions ranked by total
 revenue" silently returned the grand total (one number) with HIGH confidence.
 
-Run: python3 test_shortcut_guard.py
+Run: python -m tests.analysis.test_shortcut_guard
 """
 import os, sys
 import pandas as pd

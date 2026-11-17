@@ -6,7 +6,7 @@ so the banner "used for your questions" was not true. Now the API route passes a
 the session cache, which is where /analyze looks first. The hook runs only when the verifier kept at least one change,
 and a failure to store is reported as "not kept", never as "used".
 
-The model and the sandbox are stubbed; no Groq. Run: python test_agent_working_table.py
+The model and the sandbox are stubbed; no Groq. Run: python -m tests.data_cleaning.test_agent_working_table
 """
 import contextlib
 import io
@@ -45,7 +45,7 @@ def main():
     from storage import cache_layer
     from data_cleaning import cleaning_agent
     from ingestion import file_reader
-    from analysis import query_engine
+    from llm import llm_provider  # the cleaning agent calls llm_provider.llm_with_fallback
     from execution import sandbox_limits
     from storage import session_cache
     from data_cleaning.cleaning import rule_based_clean
@@ -63,7 +63,7 @@ def main():
             if "Defects to fix" in prompt:
                 return "REASONING:\n- state: tidy\n```python\ncleaned_df = df.copy()\n```"
             return DIAG
-        query_engine.llm_with_fallback = fake_model
+        llm_provider.llm_with_fallback = fake_model
 
         def fake_sandbox(code, df, include_charts=False, timeout_seconds=20, **k):
             return SimpleNamespace(success=True, produced=True, value=transform(df.copy()), error=None)
